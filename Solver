@@ -1,0 +1,1187 @@
+"""
+============================================================
+                  TRITOWERS FAST SOLVER
+============================================================
+
+Cards are identified ONLY by rank.
+Suits are irrelevant.
+
+There are four copies of every rank:
+
+A 2 3 4 5 6 7 8 9 10 J Q K
+
+There are 28 cards in the three towers.
+
+Positions:
+    01-03 = top cards
+    04-09 = second row
+    10-18 = third row
+    19-28 = bottom row
+
+With one card already on the waste, there are 27 stock cards.
+
+============================================================
+"""
+
+import random
+from collections import Counter
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+RANKS = (
+    "A", "2", "3", "4", "5", "6", "7",
+    "8", "9", "10", "J", "Q", "K"
+)
+
+VALUE = {
+    rank: i + 1
+    for i, rank in enumerate(RANKS)
+}
+
+COPIES_PER_RANK = 4
+
+ACE_WRAP = True
+
+SIMULATIONS = 1200
+
+MAX_SIMULATION_MOVES = 100
+
+INITIAL_STOCK_SIZE = 27
+
+
+# ============================================================
+# TABLEAU
+# ============================================================
+
+"""
+CORRECT 28-CARD LAYOUT
+
+                         [01]       [02]       [03]
+
+
+                    [04] [05]   [06] [07]   [08] [09]
+
+
+               [10] [11] [12] [13] [14] [15] [16] [17] [18]
+
+
+        [19] [20] [21] [22] [23] [24] [25] [26] [27] [28]
+
+
+Bottom row:
+19 20 21 22 23 24 25 26 27 28
+"""
+
+
+# ------------------------------------------------------------
+# Covering relationships
+#
+# Each entry is:
+#
+#     card: (card_a, card_b)
+#
+# Those two cards must BOTH be removed before the card
+# becomes exposed.
+#
+# ------------------------------------------------------------
+
+BLOCKERS = {
+
+    # Tower 1
+    1: (4, 5),
+    4: (10, 11),
+    5: (11, 12),
+
+    # Tower 2
+    2: (6, 7),
+    6: (13, 14),
+    7: (14, 15),
+
+    # Tower 3
+    3: (8, 9),
+    8: (16, 17),
+    9: (17, 18),
+
+    # Third row
+    10: (19, 20),
+    11: (20, 21),
+    12: (21, 22),
+
+    13: (22, 23),
+    14: (23, 24),
+    15: (24, 25),
+
+    16: (25, 26),
+    17: (26, 27),
+    18: (27, 28),
+}
+
+
+# ============================================================
+# CARD FUNCTIONS
+# ============================================================
+
+def normalize(card):
+
+    card = card.strip().upper()
+
+    if card in ("?", "--"):
+        return card
+
+    if card not in RANKS:
+        raise ValueError(
+            f"Invalid card '{card}'. "
+            "Use A, 2-10, J, Q or K."
+        )
+
+    return card
+
+
+def can_play(card, waste):
+
+    a = VALUE[card]
+    b = VALUE[waste]
+
+    if abs(a - b) == 1:
+        return True
+
+    if ACE_WRAP and {a, b} == {1, 13}:
+        return True
+
+    return False
+
+
+# ============================================================
+# GAME STATE
+# ============================================================
+
+class Game:
+
+    def __init__(
+        self,
+        board,
+        waste,
+        stock_known,
+        stock
+    ):
+
+        self.board = list(board)
+
+        self.waste = waste
+
+        self.stock_known = stock_known
+
+        if stock_known:
+            self.stock = list(stock)
+        else:
+            self.stock = int(stock)
+
+        self.removed = {
+            position
+            for position, card
+            in enumerate(
+                self.board,
+                start=1
+            )
+            if card == "--"
+        }
+
+    def copy(self):
+
+        if self.stock_known:
+            stock = self.stock.copy()
+        else:
+            stock = self.stock
+
+        new_game = Game(
+            self.board.copy(),
+            self.waste,
+            self.stock_known,
+            stock
+        )
+
+        new_game.removed = (
+            self.removed.copy()
+        )
+
+        return new_game
+
+    # --------------------------------------------------------
+    # Cards remaining
+    # --------------------------------------------------------
+
+    def remaining(self):
+
+        count = 0
+
+        for position in range(1, 29):
+
+            if position in self.removed:
+                continue
+
+            if self.board[position - 1] == "--":
+                continue
+
+            count += 1
+
+        return count
+
+    # --------------------------------------------------------
+    # Exposed cards
+    # --------------------------------------------------------
+
+    def exposed(self):
+
+        result = []
+
+        for position in range(1, 29):
+
+            if position in self.removed:
+                continue
+
+            card = self.board[position - 1]
+
+            if card == "--":
+                continue
+
+            blockers = BLOCKERS.get(
+                position,
+                ()
+            )
+
+            if all(
+                blocker in self.removed
+                for blocker in blockers
+            ):
+                result.append(position)
+
+        return result
+
+    # --------------------------------------------------------
+    # Legal moves
+    # --------------------------------------------------------
+
+    def legal_moves(self):
+
+        result = []
+
+        for position in self.exposed():
+
+            card = self.board[position - 1]
+
+            if card == "?":
+                continue
+
+            if can_play(
+                card,
+                self.waste
+            ):
+                result.append(position)
+
+        return result
+
+    # --------------------------------------------------------
+    # Play
+    # --------------------------------------------------------
+
+    def play(self, position):
+
+        card = self.board[position - 1]
+
+        self.removed.add(position)
+
+        self.waste = card
+
+        return card
+
+
+# ============================================================
+# CARD ACCOUNTING
+# ============================================================
+
+def known_counts(game):
+
+    counts = Counter()
+
+    # Tableau
+    for position in range(1, 29):
+
+        if position in game.removed:
+            continue
+
+        card = game.board[position - 1]
+
+        if card in RANKS:
+            counts[card] += 1
+
+    # Waste
+    if game.waste in RANKS:
+        counts[game.waste] += 1
+
+    # Known stock
+    if game.stock_known:
+
+        for card in game.stock:
+            counts[card] += 1
+
+    return counts
+
+
+def unknown_counts(game):
+
+    known = known_counts(game)
+
+    return {
+        rank: max(
+            0,
+            COPIES_PER_RANK - known[rank]
+        )
+        for rank in RANKS
+    }
+
+
+def random_unknown_card(game):
+
+    counts = unknown_counts(game)
+
+    pool = []
+
+    for rank, count in counts.items():
+
+        pool.extend(
+            [rank] * count
+        )
+
+    if not pool:
+        return random.choice(RANKS)
+
+    return random.choice(pool)
+
+
+# ============================================================
+# DISPLAY
+# ============================================================
+
+def display(game):
+
+    def card(position):
+
+        if position in game.removed:
+            return "--"
+
+        return game.board[position - 1]
+
+    print()
+    print(
+        f"                         "
+        f"[{card(1):>2}]       "
+        f"[{card(2):>2}]       "
+        f"[{card(3):>2}]"
+    )
+
+    print()
+
+    print(
+        f"                    "
+        f"[{card(4):>2}] [{card(5):>2}]   "
+        f"[{card(6):>2}] [{card(7):>2}]   "
+        f"[{card(8):>2}] [{card(9):>2}]"
+    )
+
+    print()
+
+    print(
+        "               "
+        + " ".join(
+            f"[{card(i):>2}]"
+            for i in range(10, 19)
+        )
+    )
+
+    print()
+
+    print(
+        "        "
+        + " ".join(
+            f"[{card(i):>2}]"
+            for i in range(19, 29)
+        )
+    )
+
+    print()
+
+    print(
+        f"Waste: {game.waste}    "
+        f"Tableau remaining: {game.remaining()}"
+    )
+
+
+# ============================================================
+# INPUT
+# ============================================================
+
+def read_cards(prompt, count):
+
+    while True:
+
+        try:
+
+            values = (
+                input(prompt)
+                .strip()
+                .upper()
+                .split()
+            )
+
+            if len(values) != count:
+
+                print(
+                    f"Please enter exactly "
+                    f"{count} cards."
+                )
+
+                continue
+
+            return [
+                normalize(card)
+                for card in values
+            ]
+
+        except ValueError as error:
+
+            print(error)
+
+
+def read_rank(prompt):
+
+    while True:
+
+        try:
+
+            card = normalize(
+                input(prompt)
+            )
+
+            if card in ("?", "--"):
+
+                print(
+                    "Please enter an actual rank."
+                )
+
+                continue
+
+            return card
+
+        except ValueError as error:
+
+            print(error)
+
+
+# ============================================================
+# STARTUP EXPLANATION
+# ============================================================
+
+def explain():
+
+    print()
+    print("=" * 70)
+    print("                    TRITOWERS SOLVER")
+    print("=" * 70)
+
+    print("""
+This solver ignores SUITS.
+Only the rank/number of a card matters.
+
+There are FOUR copies of every rank:
+
+    A  2  3  4  5  6  7  8  9  10  J  Q  K
+
+
+TERMS
+-----
+
+TABLEAU
+The 28 cards arranged into the three towers.
+
+WASTE
+The one card currently showing. A tableau card can be
+played if it is one rank above or below the waste.
+
+A and K are treated as adjacent.
+
+STOCK
+The cards you draw when no tableau card can be played.
+There are always 27 stock cards when the game starts.
+
+BOTTOM ROW
+Positions 19-28.
+
+EXPOSED
+A card is exposed when both cards immediately covering it
+have been removed.
+
+If only the bottom row is known, the solver will NOT ask
+about upper cards until they become exposed.
+
+GUARANTEED ROUTE
+The solver first looks for moves which are guaranteed to
+be safe given the information currently known.
+
+STATISTICAL ROUTE
+If no guaranteed move is available, the solver uses
+probability simulations to choose the move most likely
+to lead to a win.
+
+During play, you do NOT have to confirm the solver's moves.
+It automatically advances after every recommendation.
+""")
+
+    print()
+    print("=" * 70)
+    print("POSITION MAP")
+    print("=" * 70)
+
+    print("""
+                         [01]       [02]       [03]
+
+
+                    [04] [05]   [06] [07]   [08] [09]
+
+
+               [10] [11] [12] [13] [14] [15] [16] [17] [18]
+
+
+        [19] [20] [21] [22] [23] [24] [25] [26] [27] [28]
+""")
+
+    print(
+        "Bottom row: 19 20 21 22 23 24 25 26 27 28"
+    )
+
+    print()
+
+
+# ============================================================
+# SETUP
+# ============================================================
+
+def setup():
+
+    explain()
+
+    # --------------------------------------------------------
+    # Ask information questions FIRST.
+    # --------------------------------------------------------
+
+    print("=" * 70)
+    print("                    INFORMATION")
+    print("=" * 70)
+
+    print()
+    print(
+        "Do you know all 28 tableau cards?"
+    )
+
+    print(
+        "1 = Yes, all cards are known"
+    )
+
+    print(
+        "2 = No, only the bottom row is known"
+    )
+
+    while True:
+
+        tableau_mode = input(
+            "\nChoice [1/2]: "
+        ).strip()
+
+        if tableau_mode in ("1", "2"):
+            break
+
+        print(
+            "Please enter 1 or 2."
+        )
+
+    print()
+    print(
+        "Do you know the stock order?"
+    )
+
+    print(
+        "1 = Yes, I know the order"
+    )
+
+    print(
+        "2 = No, the stock is unknown"
+    )
+
+    while True:
+
+        stock_mode = input(
+            "\nChoice [1/2]: "
+        ).strip()
+
+        if stock_mode in ("1", "2"):
+            break
+
+        print(
+            "Please enter 1 or 2."
+        )
+
+    # --------------------------------------------------------
+    # CARD ENTRY
+    # --------------------------------------------------------
+
+    board = ["?"] * 28
+
+    print()
+    print("=" * 70)
+    print("                      CARD ENTRY")
+    print("=" * 70)
+
+    if tableau_mode == "1":
+
+        print("""
+Enter the 28 tableau cards in position order:
+
+01 02 03 04 05 ... 26 27 28
+
+Enter them all on ONE line.
+Use -- for an already removed card.
+""")
+
+        board = read_cards(
+            "> ",
+            28
+        )
+
+    else:
+
+        print("""
+Enter the bottom row in this order:
+
+19 20 21 22 23 24 25 26 27 28
+
+Enter all 10 cards on ONE line.
+""")
+
+        bottom = read_cards(
+            "> ",
+            10
+        )
+
+        board[18:28] = bottom
+
+    # --------------------------------------------------------
+    # Waste
+    # --------------------------------------------------------
+
+    print()
+
+    waste = read_rank(
+        "Waste: "
+    )
+
+    # --------------------------------------------------------
+    # Stock
+    # --------------------------------------------------------
+
+    if stock_mode == "1":
+
+        print("""
+Enter the 27 stock cards in DRAW ORDER.
+
+The first card entered is the next card drawn.
+
+Enter all 27 on ONE line.
+""")
+
+        stock = read_cards(
+            "> ",
+            27
+        )
+
+        stock_known = True
+
+    else:
+
+        # Always 27 cards initially.
+        stock = INITIAL_STOCK_SIZE
+        stock_known = False
+
+    return Game(
+        board,
+        waste,
+        stock_known,
+        stock
+    )
+
+
+# ============================================================
+# REVEAL UNKNOWN CARDS
+# ============================================================
+
+def reveal_unknowns(game):
+
+    unknown_positions = [
+        position
+        for position in game.exposed()
+        if game.board[position - 1] == "?"
+    ]
+
+    for position in unknown_positions:
+
+        card = read_rank(
+            f"Position {position:02d}: "
+        )
+
+        game.board[position - 1] = card
+
+
+# ============================================================
+# DRAW
+# ============================================================
+
+def draw(game):
+
+    if game.stock_known:
+
+        if not game.stock:
+            return False
+
+        game.waste = game.stock.pop(0)
+
+        print(
+            f"DRAW -> {game.waste}"
+        )
+
+        return True
+
+    if game.stock <= 0:
+        return False
+
+    # Unknown stock:
+    # user only supplies the card actually drawn.
+
+    card = read_rank(
+        "DRAW -> "
+    )
+
+    game.stock -= 1
+
+    game.waste = card
+
+    return True
+
+
+# ============================================================
+# MOVE SCORE
+# ============================================================
+
+def move_score(game, position):
+
+    child = game.copy()
+
+    child.play(position)
+
+    score = 0
+
+    for exposed in child.exposed():
+
+        card = child.board[exposed - 1]
+
+        if card == "?":
+
+            score += 20
+
+        else:
+
+            score += 10
+
+            if can_play(
+                card,
+                child.waste
+            ):
+                score += 8
+
+    score += (
+        28 - child.remaining()
+    ) * 2
+
+    return score
+
+
+# ============================================================
+# GUARANTEED MOVE TEST
+# ============================================================
+
+def guaranteed_moves(game):
+
+    result = []
+
+    for position in game.legal_moves():
+
+        child = game.copy()
+
+        child.play(position)
+
+        # Immediate win.
+        if child.remaining() == 0:
+
+            result.append(position)
+            continue
+
+        safe = True
+
+        for exposed in child.exposed():
+
+            card = child.board[
+                exposed - 1
+            ]
+
+            if card == "?":
+                continue
+
+            # It can already continue.
+            if can_play(
+                card,
+                child.waste
+            ):
+                continue
+
+            no_stock = (
+                (
+                    child.stock_known
+                    and not child.stock
+                )
+                or
+                (
+                    not child.stock_known
+                    and child.stock == 0
+                )
+            )
+
+            if no_stock:
+
+                safe = False
+                break
+
+        if safe:
+            result.append(position)
+
+    return result
+
+
+# ============================================================
+# MONTE CARLO
+# ============================================================
+
+def simulate(
+    game,
+    first_move=None
+):
+
+    g = game.copy()
+
+    if first_move is not None:
+
+        g.play(first_move)
+
+    for _ in range(
+        MAX_SIMULATION_MOVES
+    ):
+
+        if g.remaining() == 0:
+            return True
+
+        # ----------------------------------------------------
+        # Resolve unknown exposed cards.
+        # ----------------------------------------------------
+
+        for position in g.exposed():
+
+            if g.board[position - 1] == "?":
+
+                g.board[position - 1] = (
+                    random_unknown_card(g)
+                )
+
+        # ----------------------------------------------------
+        # Play available card.
+        # ----------------------------------------------------
+
+        moves = g.legal_moves()
+
+        if moves:
+
+            scored = [
+                (
+                    move_score(g, position),
+                    position
+                )
+                for position in moves
+            ]
+
+            scored.sort(
+                reverse=True
+            )
+
+            top = scored[
+                :min(3, len(scored))
+            ]
+
+            _, position = random.choice(
+                top
+            )
+
+            g.play(position)
+
+            continue
+
+        # ----------------------------------------------------
+        # Draw.
+        # ----------------------------------------------------
+
+        if g.stock_known:
+
+            if not g.stock:
+                return False
+
+            g.waste = g.stock.pop(0)
+
+        else:
+
+            if g.stock <= 0:
+                return False
+
+            g.stock -= 1
+
+            g.waste = (
+                random_unknown_card(g)
+            )
+
+    return g.remaining() == 0
+
+
+def probability(
+    game,
+    position
+):
+
+    wins = 0
+
+    for _ in range(
+        SIMULATIONS
+    ):
+
+        if simulate(
+            game,
+            first_move=position
+        ):
+            wins += 1
+
+    return wins / SIMULATIONS
+
+
+# ============================================================
+# BEST MOVE
+# ============================================================
+
+def best_move(game):
+
+    moves = game.legal_moves()
+
+    if not moves:
+        return None, None
+
+    # --------------------------------------------------------
+    # Guaranteed first.
+    # --------------------------------------------------------
+
+    guaranteed = guaranteed_moves(
+        game
+    )
+
+    if guaranteed:
+
+        guaranteed.sort(
+            key=lambda position:
+                move_score(
+                    game,
+                    position
+                ),
+            reverse=True
+        )
+
+        return (
+            guaranteed[0],
+            1.0
+        )
+
+    # --------------------------------------------------------
+    # Statistical route.
+    # --------------------------------------------------------
+
+    best_position = None
+    best_probability = -1.0
+    best_score = -1
+
+    for position in moves:
+
+        p = probability(
+            game,
+            position
+        )
+
+        score = move_score(
+            game,
+            position
+        )
+
+        if (
+            p > best_probability
+            or
+            (
+                p == best_probability
+                and score > best_score
+            )
+        ):
+
+            best_probability = p
+            best_score = score
+            best_position = position
+
+    return (
+        best_position,
+        best_probability
+    )
+
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+
+def main():
+
+    game = setup()
+
+    print()
+    print("=" * 70)
+    print("                     SOLVER ACTIVE")
+    print("=" * 70)
+
+    while True:
+
+        # ----------------------------------------------------
+        # Newly exposed unknown cards.
+        # ----------------------------------------------------
+
+        reveal_unknowns(game)
+
+        # ----------------------------------------------------
+        # Win.
+        # ----------------------------------------------------
+
+        if game.remaining() == 0:
+
+            print()
+            print("=" * 70)
+            print("                         WIN!")
+            print("=" * 70)
+
+            return
+
+        # ----------------------------------------------------
+        # Find current legal moves.
+        # ----------------------------------------------------
+
+        moves = game.legal_moves()
+
+        # ----------------------------------------------------
+        # No tableau move -> draw.
+        # ----------------------------------------------------
+
+        if not moves:
+
+            if (
+                (
+                    game.stock_known
+                    and not game.stock
+                )
+                or
+                (
+                    not game.stock_known
+                    and game.stock <= 0
+                )
+            ):
+
+                print()
+                print(
+                    "No playable cards and "
+                    "the stock is empty."
+                )
+
+                return
+
+            draw(game)
+
+            continue
+
+        # ----------------------------------------------------
+        # Find best move.
+        # ----------------------------------------------------
+
+        position, p = best_move(game)
+
+        card = game.board[
+            position - 1
+        ]
+
+        if p == 1.0:
+
+            print(
+                f"\nPLAY {card} @ "
+                f"{position:02d} "
+                f"[GUARANTEED]"
+            )
+
+        else:
+
+            print(
+                f"\nPLAY {card} @ "
+                f"{position:02d} "
+                f"[{p * 100:.1f}%]"
+            )
+
+        # ----------------------------------------------------
+        # Automatically advance.
+        # ----------------------------------------------------
+
+        game.play(position)
+
+
+# ============================================================
+# RUN
+# ============================================================
+
+if __name__ == "__main__":
+
+    try:
+
+        main()
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nSolver stopped."
+        )
+
+    except Exception as error:
+
+        print(
+            f"\nERROR: {error}"
+        )
