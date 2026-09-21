@@ -1,0 +1,2 @@
+# Private pilot dataset contract
+Pilot: 30-50 permission-cleared photos. Next: 200-400 stills from 20-30 sessions, ideally >=3 machines and >=2 venues. Hold out >=50 photos from unseen machine/session; split 70/15/15 by whole session with venue/machine/augmentation siblings isolated. Never infer hidden cards. Double-label 10-20%. Target gates (not current results): >=95% screen detection, >=98% occupancy, >=90% visible-card identity, >=80% whole-frame exact extraction; abstention reported separately.
