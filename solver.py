@@ -778,9 +778,10 @@ def read_stock_count(read_line=None, emit=print):
         emit(f"Please enter a whole number from 0 to {TOTAL_STOCK}.")
 
 
-def setup():
+def setup(skip_tutorial=False):
 
-    explain()
+    if not skip_tutorial:
+        explain()
 
     # ------------------------------------------------------------------
     # ASK ALL INFORMATION QUESTIONS BEFORE CARD ENTRY
@@ -1341,9 +1342,13 @@ def best_move(game, simulations=SIMULATIONS, rng=None, time_budget=None):
 # MAIN GAME LOOP
 # ======================================================================
 
-def main():
+def main(argv=None):
 
-    game = setup()
+    import tritowers_cli
+
+    args = tritowers_cli.build_parser().parse_args(argv)
+    rng = random.Random(args.seed) if args.seed is not None else None
+    game = setup(skip_tutorial=args.skip_tutorial)
 
     print()
     print("=" * 72)
@@ -1357,6 +1362,9 @@ def main():
         # --------------------------------------------------------------
 
         reveal_unknowns(game)
+
+        print()
+        print(tritowers_cli.format_board(game))
 
         # --------------------------------------------------------------
         # Check for win.
@@ -1411,7 +1419,12 @@ def main():
         # Find best move.
         # --------------------------------------------------------------
 
-        recommendation = best_move(game)
+        recommendation = best_move(
+            game,
+            simulations=args.simulations,
+            rng=rng,
+            time_budget=args.time_budget,
+        )
         position = recommendation.position
         card = game.board[position - 1]
 
@@ -1458,6 +1471,12 @@ if __name__ == "__main__":
     try:
 
         main()
+
+    except EOFError:
+
+        print(
+            "\nInput ended; solver stopped."
+        )
 
     except KeyboardInterrupt:
 
