@@ -17,6 +17,10 @@ def build_parser():
         "--simulations", type=positive_int, default=solver.SIMULATIONS,
         help=f"simulations per candidate (default: {solver.SIMULATIONS})",
     )
+    parser.add_argument(
+        "--time-budget", type=positive_float, default=None,
+        help="cap total sampling time per recommendation, in seconds",
+    )
     parser.add_argument("--skip-tutorial", action="store_true", help="skip the startup tutorial")
     return parser
 
@@ -25,6 +29,13 @@ def positive_int(value):
     parsed = int(value)
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def positive_float(value):
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number")
     return parsed
 
 
