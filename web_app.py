@@ -191,16 +191,29 @@ def api_solve(body: dict):
     except Exception as e: return {"ok": False, "message": str(e)}
     fn = getattr(solver, "solve_complete", None)
     if fn is None: return {"ok": True, "status": "unavailable", "message": "The exact solver is not installed in this build yet."}
-    try: res = fn(game.copy(), time_budget=min(float(body.get("time_budget", 20)), 25))
+    budget = min(float(body.get("time_budget", 20)), 25)
+    def run(stuck, share):
+        return fn(game.copy(), time_budget=budget * share, require_full_deal=True, draw_only_when_stuck=stuck)
+    try:
+        res = run(True, 0.5); policy = "stuck"
+        if res.status in ("unsolvable", "unknown"):
+            res2 = run(False, 0.5)
+            if res2.status == "solved": res, policy = res2, "voluntary"
+            elif res.status == "unsolvable" and res2.status == "unsolvable": policy = "both"
+            elif res.status == "unsolvable": res = res2; policy = "voluntary"   # voluntary undecided: say so below
+            elif res2.status == "unsolvable": policy = "both"                    # voluntary unsolvable implies stuck-only unsolvable
     except Exception as e: return {"ok": False, "message": f"Solver error: {e}"}
-    out = {"ok": True, "status": res.status, "nodes": getattr(res, "nodes", None), "seconds": getattr(res, "seconds", None)}
+    out = {"ok": True, "status": res.status, "policy": policy, "nodes": getattr(res, "nodes", None), "seconds": getattr(res, "seconds", None)}
     if res.status == "solved":
         try: frames, texts = _replay_frames(game, list(res.moves))
         except Exception as e: return {"ok": False, "message": f"Solver returned a line that failed verification ({e}). Not shown."}
-        out.update(message=f"Solved in {len(texts)} steps (line verified by replay).", steps=texts, frames=frames)
-    elif res.status == "unsolvable": out["message"] = "Proven unsolvable: the search was exhaustive and no winning line exists."
+        note = ("Valid whether or not the machine lets you draw while a play is available." if policy == "stuck" else
+                "Only works if the machine lets you draw while a play is available (not verified).")
+        out.update(message=f"Solved in {len(texts)} steps (line verified by replay). {note}", steps=texts, frames=frames)
+    elif res.status == "unsolvable" and policy == "both": out["message"] = "Proven unsolvable under both draw rules: the search was exhaustive and no winning line exists."
+    elif res.status == "unsolvable": out["message"] = "No line wins if you may only draw when no play is available. Whether voluntary draws would help was not decided, so this is NOT a full proof."; out["status"] = "unknown"
     elif res.status == "unknown": out["message"] = f"Could not decide in the time limit ({getattr(res, 'reason', 'timeout')}). This is NOT a proof that it is unsolvable."
-    else: out["message"] = "The deal is incomplete for the solver: " + str(getattr(res, "reason", ""))
+    else: out["message"] = "The deal is not valid or complete for the solver: " + str(getattr(res, "reason", ""))
     return out
 
 @app.post("/api/photo")
