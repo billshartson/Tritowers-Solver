@@ -93,3 +93,17 @@ def test_photo_full_frame_default(server, browser):
     page = browser.new_page(viewport=VIEWPORTS["phone"]); page.goto(server); page.wait_for_selector("#editBoard .c")
     page.set_input_files("#photo", PHOTO); page.wait_for_function("document.getElementById('photoNote').textContent.length>0", timeout=60000)
     assert "prototype" in page.inner_text("#photoNote")
+
+
+@pytest.mark.parametrize("vp", VIEWPORTS)
+def test_complete_deal_mode_never_guesses(server, browser, vp):
+    page = browser.new_page(viewport=VIEWPORTS[vp]); errs = []
+    page.on("pageerror", lambda e: errs.append(str(e)))
+    page.goto(server); page.wait_for_selector("#editBoard .c")
+    page.click("#modeDeal"); assert page.is_visible("#solveBtn") and not page.is_visible("#startBtn")
+    page.click("#solveBtn"); page.wait_for_selector("#solBanner")
+    page.wait_for_function("document.getElementById('solBanner').textContent.includes('not complete')", timeout=15000)
+    assert "will not guess" in page.inner_text("#solBanner") and not page.is_visible("#solBody")
+    page.click("#solEdit"); page.click("#soAdd"); page.click('#keys button[data-k="7"]')
+    assert page.locator("#soChips .chip").count() == 1 and not errs
+    page.close()

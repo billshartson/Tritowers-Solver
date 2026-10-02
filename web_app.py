@@ -78,7 +78,43 @@ def api_new(body: dict):
     with _glock:
         _sessions[sid] = entry
         while len(_sessions) > MAX_SESSIONS: _sessions.popitem(last=False)
+    _precompute(entry)
     r = view(entry); r["sid"] = sid; return r
+
+def _key(game):
+    return repr((list(game.board), game.waste, game.stock_remaining, list(getattr(game, "stock", []) or [])))
+
+_pre_sem = threading.Semaphore(1)   # one background solve at a time per process (2 cores)
+
+def _precompute(entry):
+    """Start computing the recommendation for the current state in the background."""
+    s = entry["s"]
+    try:
+        if s.game.remaining() == 0 or ui.pending_reveals(s.game): entry["pre"] = None; return
+        game = s.game.copy(); key = _key(game)
+    except Exception: entry["pre"] = None; return
+    cur = entry.get("pre")
+    if cur and cur["key"] == key: return
+    pre = {"key": key, "done": threading.Event(), "res": None}; entry["pre"] = pre
+    def work():
+        try:
+            with _pre_sem:
+                if entry.get("pre") is not pre: pre["done"].set(); return   # superseded before starting
+                tmp = ui.Session(game)
+                text, pos, proven, rate, sims = ui.recommend_detail(tmp, 1200, None)
+                if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {game.board[pos - 1]} marked with the blue star.")
+                pre["res"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims}
+        except Exception: pre["res"] = None
+        finally: pre["done"].set()
+    threading.Thread(target=work, daemon=True).start()
+
+def _adopt(entry):
+    """If the background result matches the current state, show it as the advice."""
+    pre = entry.get("pre")
+    if pre and pre["done"].is_set() and pre["res"] and not entry.get("advice"):
+        try:
+            if pre["key"] == _key(entry["s"].game): entry["advice"] = pre["res"]
+        except Exception: pass
 
 def _do(entry, op, body):
     s = entry["s"]; msg = ""
@@ -90,10 +126,16 @@ def _do(entry, op, body):
     elif op == "state": msg = ""
     elif op == "undo": s.undo(); entry["advice"] = None; msg = s.log[-1]
     elif op == "recommend":
+        pre = entry.get("pre")
+        if pre and pre["key"] == _key(s.game):
+            pre["done"].wait(40); _adopt(entry)
+            if entry.get("advice"): return ""
         text, pos, proven, rate, sims = ui.recommend_detail(s, body.get("sims", 1200), body.get("seed"))
         if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {s.game.board[pos - 1]} marked with the blue star.")
         entry["advice"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims}
     else: raise ValueError("Unknown action.")
+    if op in ("play", "reveal", "draw", "undo"): _precompute(entry)
+    if op == "state": _adopt(entry)
     return msg
 
 @app.post("/api/act")
@@ -113,6 +155,53 @@ def api_act(body: dict):
         except Exception as e: reply = view(entry, str(e), ok=False)
     entry["replies"][rid] = reply; ev.set()
     return reply
+
+def _replay_frames(game, moves):
+    """Replay a returned line on a fresh copy and return (frames, texts). Raises ValueError if any step is illegal."""
+    g = game.copy(); frames = []; texts = []
+    def frame(g, nxt):
+        f = view({"s": ui.Session(g.copy()), "advice": None}); f.pop("log", None); f.pop("advice", None)
+        f["next"] = nxt; return f
+    for mv in moves:
+        nxt = mv[1] if mv[0] == "play" else None
+        frames.append(frame(g, nxt))
+        if mv[0] == "play":
+            card = g.play(int(mv[1])); texts.append(f"Play the {card} (position {int(mv[1])})")
+        elif mv[0] == "draw":
+            if not g.stock: raise ValueError("Line draws from an empty stock.")
+            card = g.stock.pop(0); g.waste = card; texts.append(f"Draw from the stock: {card}")
+        else: raise ValueError("Unknown step.")
+    frames.append(frame(g, None))
+    if g.remaining() != 0: raise ValueError("Line does not clear the tableau.")
+    return frames, texts
+
+@app.post("/api/solve")
+def api_solve(body: dict):
+    """Complete-deal mode: every card known, stock order known. Never guesses missing cards."""
+    board = str(body.get("board", "")).replace(",", " ").split(); waste = str(body.get("waste", "")).strip()
+    stock = [str(x).strip() for x in (body.get("stock") or [])]
+    missing = []
+    if len(board) != 28: return {"ok": False, "message": f"Need 28 board entries, got {len(board)}."}
+    missing += [f"tableau position {i}" for i, c in enumerate(board, 1) if c == "?"]
+    if not waste: missing.append("waste card")
+    if body.get("stock_count") is not None and int(body["stock_count"]) != len(stock): missing.append(f"stock order ({len(stock)} of {int(body['stock_count'])} cards entered)")
+    if missing:
+        return {"ok": True, "status": "incomplete", "message": "The deal is not complete, so I will not guess. Missing: " + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "") + ".", "missing": missing}
+    try: game = solver.Game(board, waste, True, stock)
+    except Exception as e: return {"ok": False, "message": str(e)}
+    fn = getattr(solver, "solve_complete", None)
+    if fn is None: return {"ok": True, "status": "unavailable", "message": "The exact solver is not installed in this build yet."}
+    try: res = fn(game.copy(), time_budget=min(float(body.get("time_budget", 20)), 25))
+    except Exception as e: return {"ok": False, "message": f"Solver error: {e}"}
+    out = {"ok": True, "status": res.status, "nodes": getattr(res, "nodes", None), "seconds": getattr(res, "seconds", None)}
+    if res.status == "solved":
+        try: frames, texts = _replay_frames(game, list(res.moves))
+        except Exception as e: return {"ok": False, "message": f"Solver returned a line that failed verification ({e}). Not shown."}
+        out.update(message=f"Solved in {len(texts)} steps (line verified by replay).", steps=texts, frames=frames)
+    elif res.status == "unsolvable": out["message"] = "Proven unsolvable: the search was exhaustive and no winning line exists."
+    elif res.status == "unknown": out["message"] = f"Could not decide in the time limit ({getattr(res, 'reason', 'timeout')}). This is NOT a proof that it is unsolvable."
+    else: out["message"] = "The deal is incomplete for the solver: " + str(getattr(res, "reason", ""))
+    return out
 
 @app.post("/api/photo")
 async def api_photo(file: UploadFile = File(...), corners: str = Form("")):
