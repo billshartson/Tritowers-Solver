@@ -25,3 +25,7 @@ jobs:
         run: python -m py_compile solver.py tritowers_cli.py tools/heuristic_baseline.py
       - name: Test
         run: python -m unittest -v test_solver.py test_cli.py test_perf_equiv.py test_setup_stock.py test_time_budget.py test_heuristic_baseline.py test_e2e_cli.py test_stock_empty.py
+      - name: UI and vision tests
+        run: |
+          python -m pip install pytest
+          python -m pytest -q tests/test_solver_ui.py tests/test_space_package.py
