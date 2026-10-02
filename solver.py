@@ -1546,10 +1546,14 @@ def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_0
     t0 = time.monotonic()
     done = lambda status, moves=(), reason="", nodes=0: SolveResult(
         status, list(moves), reason, nodes, round(time.monotonic() - t0, 4))
-    if not game.stock_known:
-        return done("incomplete", reason="unknown_stock")
-    if any(c == "?" for p, c in enumerate(game.board, 1) if p not in game.removed):
-        return done("incomplete", reason="unknown_cards")
+    try:
+        stock_known = game.stock_known
+        if not stock_known:
+            return done("incomplete", reason="unknown_stock")
+        if any(c == "?" for p, c in enumerate(game.board, 1) if p not in game.removed):
+            return done("incomplete", reason="unknown_cards")
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        return done("incomplete", reason=f"invalid_deal: {exc}")
     # Game fields are mutable, so re-validate rather than trust the constructor.
     try:
         if any(c == "?" for c in game.board):
@@ -1568,7 +1572,7 @@ def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_0
             return done("incomplete", reason="not_full_deal")
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         return done("incomplete", reason=f"invalid_deal: {exc}")
-    board, stock = list(game.board), list(game.stock)
+    board, stock = list(game.board), list(game.stock)  # validated above
     n, full = len(stock), (1 << TOTAL_TABLEAU) - 1
     need = [sum(1 << (b - 1) for b in BLOCKER_SETS[p]) for p in range(1, TOTAL_TABLEAU + 1)]
     start = sum(1 << (p - 1) for p in removed)
