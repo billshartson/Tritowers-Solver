@@ -55,13 +55,14 @@ def render_board(session):
         else: cls, label = ("play" if p in legal else "up" if p in exposed else "blocked"), html.escape(card)
         return f'<div class="c {cls}"><small>{p}</small>{label}</div>'
     W, H, XU, YU = 52, 68, 58, 76
+    CW, CH = 9 * XU + W, 3 * YU + H
     xs = {p: float(p - 19) for p in range(19, 29)}
     for p in sorted(solver.BLOCKERS, reverse=True): xs[p] = sum(xs[b] for b in solver.BLOCKERS[p]) / 2
     ys = {p: next(i for i, row in enumerate(ROWS) if p in row) for p in range(1, 29)}
-    cells = "".join(cell(p).replace('<div class="c ', f'<div style="left:{xs[p]*XU:.0f}px;top:{ys[p]*YU}px" class="c ', 1) for p in range(1, 29))
-    rows = f'<div class="towers" style="position:relative;width:{9*XU+W}px;height:{3*YU+H}px;margin:0 auto">{cells}</div>'
-    css = ("<style>.c{position:absolute;width:52px;height:68px;border-radius:6px;border:1px solid #888;display:flex;"
-           "flex-direction:column;align-items:center;justify-content:center;font:700 20px sans-serif}.c small{position:absolute;top:2px;left:4px;font:10px sans-serif;opacity:.6}"
+    cells = "".join(cell(p).replace('<div class="c ', f'<div style="left:{xs[p]*XU/CW*100:.3f}%;top:{ys[p]*YU/CH*100:.3f}%" class="c ', 1) for p in range(1, 29))
+    rows = f'<div class="tw"><div class="towers" style="aspect-ratio:{CW}/{CH}">{cells}</div></div>'
+    css = ("<style>.tw{container-type:inline-size;width:100%;max-width:574px;margin:0 auto}.towers{position:relative;width:100%}.c{position:absolute;width:9.06%;height:22.97%;border-radius:6px;border:1px solid #888;display:flex;"
+           "flex-direction:column;align-items:center;justify-content:center;font:700 clamp(11px,3.6cqw,20px) sans-serif}.c small{position:absolute;top:2px;left:4px;font:clamp(7px,1.8cqw,10px) sans-serif;opacity:.6}"
            ".gone{border-style:dashed;opacity:.25}.back{background:#a33;color:#fff}.ask{background:#fc6;color:#000}.up{background:#f6f1e3;color:#222}.play{background:#cfe9c8;color:#111;border:2px solid #2a7}.blocked{background:#ddd;color:#555}</style>")
     foot = (f'<div style="text-align:center;margin-top:8px">Waste <b>{s["waste"]}</b> &nbsp;|&nbsp; Tableau left <b>{s["remaining"]}</b> &nbsp;|&nbsp; Stock left <b>{s["stock_remaining"]}</b></div>'
             '<div style="text-align:center;font-size:12px;opacity:.7">green = playable now, yellow ? = tell me this card, red = still covered</div>')
