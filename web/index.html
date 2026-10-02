@@ -108,15 +108,17 @@ function keypad(title,extra,cb){
 function closeSheet(){$("sheet").classList.remove("open");document.querySelectorAll(".c.sel").forEach(e=>e.classList.remove("sel"))}
 $("sheetX").onclick=closeSheet;
 $("sheet").onclick=e=>{if(e.target.id==="sheet")closeSheet()};
-async function act(op,extra,{timeout}={}){
-  if(busy)return;setBusy(true);msg(op==="recommend"?"Thinking…":"");
+let chain=Promise.resolve(),pendingN=0;
+function act(op,extra,opts){pendingN++;const run=chain.then(()=>doAct(op,extra,opts||{}));chain=run.catch(()=>{}).then(()=>{pendingN--;if(pendingN===0){busy=false;if(S)draw()}});return chain}
+async function doAct(op,extra,{timeout}){
+  busy=true;if(S)draw();msg(op==="recommend"?"Thinking…":"");
   try{
     const r=await post("/api/act",{sid,op,...extra},{timeout});
-    if(r.gone){sessionStorage.removeItem("tt_sid");sid=null;$("play").hidden=true;$("setup").hidden=false;msg(r.message,"err");busy=false;return}
-    S=r;busy=false;draw();msg(r.ok?r.message:r.message,r.ok?"":"err");
-  }catch(e){busy=false;if(S)draw();msg("Could not reach the server. Check your connection and try again.","err")}
+    if(r.gone){sessionStorage.removeItem("tt_sid");sid=null;$("play").hidden=true;$("setup").hidden=false;msg(r.message,"err");return}
+    S=r;draw();msg(r.message,r.ok?"":"err");
+  }catch(e){msg("Could not reach the server. Check your connection and try again.","err")}
 }
-$("board").onclick=e=>{const b=e.target.closest(".c");if(!b||!S||busy)return;const p=+b.dataset.p,c=S.cells[p-1];
+$("board").onclick=e=>{const b=e.target.closest(".c");if(!b||!S)return;const p=+b.dataset.p,c=S.cells[p-1];
   if(c.kind==="play")act("play",{pos:p});
   else if(c.kind==="ask"){b.classList.add("sel");keypad("What is the outlined card?",[],k=>act("reveal",{pos:p,rank:k}));}
   else if(c.kind==="blocked")msg("That card is still covered by two cards.");
