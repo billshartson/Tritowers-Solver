@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TriTowers solver</title>
+<style>
+:root{--bg:#f4f1ea;--ink:#1d1d1f;--mut:#6b6b70;--card:#fffdf7;--back:#a33;--ok:#2a7;--ask:#fc6;--pri:#e8590c;--blue:#1c6ed5}
+*{box-sizing:border-box}html,body{margin:0}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:12px;-webkit-tap-highlight-color:transparent}
+main{max-width:720px;margin:0 auto}h1{font-size:22px;margin:4px 0 2px}.sub{color:var(--mut);font-size:13px;margin:0 0 10px}
+.panel{background:#fff;border-radius:14px;padding:12px;margin:10px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.tw{container-type:inline-size;width:100%;max-width:640px;margin:6px auto}.towers{position:relative;width:100%}
+.c{position:absolute;width:9.06%;height:22.97%;border-radius:7px;border:1.5px solid #8a8a8a;display:flex;align-items:center;justify-content:center;font:700 clamp(12px,4.2cqw,28px) system-ui,sans-serif;padding:0;background:var(--card);color:var(--ink);cursor:default;touch-action:manipulation}
+.c.gone{border-style:dashed;opacity:.18;background:none}.c.back{background:var(--back);color:#fff;border-color:#722}.c.blocked{background:#e1ded6;color:#666}.c.up{background:var(--card)}
+.c.play{border:3px solid var(--ok);background:#dff3d8;cursor:pointer}.c.ask{background:var(--ask);border:3px solid #c80;cursor:pointer;animation:p 1.2s infinite}
+.c.edit{cursor:pointer}.c.sel{outline:4px solid var(--blue);outline-offset:2px;z-index:3}.c.rec{box-shadow:0 0 0 4px var(--blue);z-index:2}.c.rec::after{content:"\2605";position:absolute;top:-9px;right:-7px;font-size:clamp(11px,3.4cqw,20px);background:var(--blue);color:#fff;border-radius:50%;width:1.6em;height:1.6em;line-height:1.6em;text-align:center}
+@keyframes p{50%{box-shadow:0 0 0 5px rgba(255,170,0,.55)}}
+.info{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:8px 0}.pill{background:#fff;border-radius:999px;padding:6px 12px;font-size:15px;box-shadow:0 1px 2px rgba(0,0,0,.1)}.pill b{font-size:18px}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1 1 140px}
+button.b{font:600 17px system-ui;padding:14px 12px;border-radius:12px;border:0;background:#e6e3da;color:var(--ink);min-height:50px;cursor:pointer}
+button.b.pri{background:var(--pri);color:#fff}button.b:disabled{opacity:.45;cursor:not-allowed}
+#msg{min-height:24px;font-size:16px;margin:6px 2px}#msg.err{color:#b00020;font-weight:600}#msg.net{color:#8a5a00}
+#status{font-weight:600;text-align:center;font-size:17px;margin:6px 0}
+.adv{border-left:6px solid var(--blue);background:#eef4ff;border-radius:8px;padding:10px 12px;font-size:16px;line-height:1.35}
+.stepper{display:flex;align-items:center;gap:10px}.stepper button{width:48px;height:48px;font-size:24px}.stepper output{font-size:24px;font-weight:700;min-width:44px;text-align:center}
+.wslot{width:64px;height:84px;border-radius:9px;border:2px solid #8a8a8a;background:var(--card);font:700 30px system-ui;cursor:pointer}
+.setrow{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:8px 0}.lbl{font-size:13px;color:var(--mut);margin-bottom:4px}
+details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace,monospace;padding:8px;border-radius:8px;border:1px solid #bbb}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:10}
+#sheet.open{display:flex}#sheet .in{background:#fff;width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+#sheet h2{margin:0 0 10px;font-size:18px}.keys{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.keys button{font:700 22px system-ui;padding:16px 0;border-radius:12px;border:0;background:#eee;min-height:56px;cursor:pointer}
+@media (min-width:600px){#sheet{align-items:center}#sheet .in{border-radius:18px}.keys{grid-template-columns:repeat(7,1fr)}}
+.log{font-size:13px;color:var(--mut);white-space:pre-wrap}
+</style></head><body><main>
+<h1>TriTowers solver</h1><p class="sub">Rank-only. Percentages are estimates, never proofs.</p>
+<div id="msg" role="status" aria-live="polite"></div>
+
+<section id="setup">
+ <div class="panel"><div class="lbl">1. Read from a photo (optional)</div>
+  <div class="row"><button class="b" id="photoBtn" type="button">Choose photo of the machine screen</button></div><input id="photo" type="file" accept="image/*" hidden>
+  <div id="photoNote" class="sub" style="margin-top:8px"></div></div>
+ <div class="panel"><div class="lbl">2. Cards on the table (tap a card to set it; red = face-down)</div>
+  <div class="tw"><div class="towers" id="editBoard"></div></div>
+  <p class="sub">The 10 cards on the bottom row are face-up. Enter them here, or just press Start and I will ask for each one.</p>
+  <div class="setrow"><div><div class="lbl">Waste card (required)</div><button class="wslot" id="wasteBtn" type="button">?</button></div>
+   <div><div class="lbl">Stock cards left</div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">23</output><button class="b" id="stP" type="button" aria-label="more">+</button></div></div></div>
+  <details><summary>Paste the board as text</summary><p class="sub">28 entries, positions 1-28. A 2-10 J Q K, ? = face-down, -- = empty.</p><textarea id="paste" rows="3"></textarea><button class="b" id="pasteBtn" type="button" style="margin-top:6px">Use this text</button></details>
+ </div>
+ <button class="b pri" id="startBtn" type="button" style="width:100%">Start game</button>
+</section>
+
+<section id="play" hidden>
+ <div class="info"><span class="pill">Waste <b id="wst">-</b></span><span class="pill">Tableau left <b id="rem">-</b></span><span class="pill">Stock left <b id="stk">-</b></span></div>
+ <div class="tw"><div class="towers" id="board"></div></div>
+ <div id="status"></div>
+ <div id="adv" class="adv" hidden></div>
+ <div class="row" style="margin-top:10px"><button class="b pri" id="recBtn" type="button">Suggest a move</button><button class="b" id="drawBtn" type="button">Draw from stock</button></div>
+ <div class="row" style="margin-top:8px"><button class="b" id="undoBtn" type="button">Undo</button><button class="b" id="newBtn" type="button">New game</button></div>
+ <details><summary>Move log</summary><div class="log" id="log"></div></details>
+ <p class="sub" style="margin-top:12px">Tap a green card to play it. Tap a yellow ? to tell me what it is. After a drawn card, press Draw and pick its rank.</p>
+</section>
+
+<div id="sheet" role="dialog" aria-modal="true"><div class="in"><h2 id="sheetT"></h2><div class="keys" id="keys"></div><button class="b" id="sheetX" type="button" style="width:100%;margin-top:10px">Cancel</button></div></div>
+</main>
+<script>
+const RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+const $=id=>document.getElementById(id);
+let sid=sessionStorage.getItem("tt_sid"),busy=false,geo=null,aspect=1.9,S=null,setup={board:Array(28).fill("?"),waste:"",stock:23};
+function msg(t,cls){const m=$("msg");m.textContent=t||"";m.className=cls||""}
+function rid(){return (crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now())}
+async function post(url,body,{timeout=75000,form=false}={}){
+  const id=rid();let last;
+  for(let i=0;i<10;i++){
+    const ac=new AbortController(),t=setTimeout(()=>ac.abort(),timeout);
+    try{
+      const r=await fetch(url,{method:"POST",headers:form?{}:{"Content-Type":"application/json"},body:form?body:JSON.stringify({...body,req_id:id}),signal:ac.signal});
+      clearTimeout(t);
+      if(r.status>=500||r.status===429){last=new Error("server "+r.status)}else{return await r.json()}
+    }catch(e){clearTimeout(t);last=e}
+    msg("Connection hiccup, retrying…","net");await new Promise(r=>setTimeout(r,Math.min(1000*(i+1),4000)));
+  }
+  throw last;
+}
+function boardHTML(cells,mode){
+  return cells.map(c=>{
+    let cls=c.kind,txt=c.card;
+    if(mode==="edit"){cls=c.card==="?"?"back":c.card==="--"?"gone":"up";cls+=" edit";txt=c.card==="--"?"":(c.card==="?"?"":c.card)}
+    else{if(c.kind==="back"||c.kind==="gone")txt="";if(c.kind==="ask")txt="?"}
+    if(mode==="play"&&S&&S.advice&&S.advice.pos===c.p)cls+=" rec";
+    const label=mode==="edit"?`Position ${c.p}`:`Position ${c.p} ${c.card||""} ${c.kind}`;
+    return `<button type="button" class="c ${cls}" data-p="${c.p}" aria-label="${label}" style="left:${c.x}%;top:${c.y}%">${txt}</button>`}).join("");
+}
+function sized(el){el.parentElement.style.aspectRatio=aspect;el.style.aspectRatio=aspect}
+function drawEdit(){const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("stV").textContent=setup.stock}
+function draw(){
+  $("setup").hidden=true;$("play").hidden=false;
+  $("board").innerHTML=boardHTML(S.cells,"play");sized($("board"));
+  $("wst").textContent=S.waste;$("rem").textContent=S.remaining;$("stk").textContent=S.stock;
+  $("status").textContent=S.over?"Tableau cleared. You won!":(S.pending.length?"Tap each yellow ? and pick the card it is.":S.status);
+  const a=S.advice;$("adv").hidden=!a;if(a)$("adv").textContent=a.text;
+  $("recBtn").disabled=busy||S.over||S.pending.length>0;$("drawBtn").disabled=busy||!S.can_draw;$("undoBtn").disabled=busy||!S.can_undo;
+  $("log").textContent=(S.log||[]).join("\n");
+}
+function setBusy(b){busy=b;if(S)draw()}
+function keypad(title,extra,cb){
+  $("sheetT").textContent=title;
+  $("keys").innerHTML=[...RANKS,...extra].map(k=>`<button type="button" data-k="${k}">${k==="--"?"empty":k}</button>`).join("");
+  $("sheet").classList.add("open");
+  $("keys").onclick=e=>{const k=e.target.dataset&&e.target.dataset.k;if(!k)return;$("sheet").classList.remove("open");cb(k)};
+}
+function closeSheet(){$("sheet").classList.remove("open");document.querySelectorAll(".c.sel").forEach(e=>e.classList.remove("sel"))}
+$("sheetX").onclick=closeSheet;
+$("sheet").onclick=e=>{if(e.target.id==="sheet")closeSheet()};
+async function act(op,extra,{timeout}={}){
+  if(busy)return;setBusy(true);msg(op==="recommend"?"Thinking…":"");
+  try{
+    const r=await post("/api/act",{sid,op,...extra},{timeout});
+    if(r.gone){sessionStorage.removeItem("tt_sid");sid=null;$("play").hidden=true;$("setup").hidden=false;msg(r.message,"err");busy=false;return}
+    S=r;busy=false;draw();msg(r.ok?r.message:r.message,r.ok?"":"err");
+  }catch(e){busy=false;if(S)draw();msg("Could not reach the server. Check your connection and try again.","err")}
+}
+$("board").onclick=e=>{const b=e.target.closest(".c");if(!b||!S||busy)return;const p=+b.dataset.p,c=S.cells[p-1];
+  if(c.kind==="play")act("play",{pos:p});
+  else if(c.kind==="ask"){b.classList.add("sel");keypad("What is the outlined card?",[],k=>act("reveal",{pos:p,rank:k}));}
+  else if(c.kind==="blocked")msg("That card is still covered by two cards.");
+  else if(c.kind==="up")msg("That card cannot be played on the waste ("+S.waste+").");
+  else if(c.kind==="back")msg("That card is face-down and covered.");};
+$("recBtn").onclick=()=>act("recommend",{sims:1200},{timeout:70000});
+$("drawBtn").onclick=()=>keypad("Which card did you draw?",[],k=>act("draw",{rank:k}));
+$("undoBtn").onclick=()=>act("undo",{});
+$("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){sessionStorage.removeItem("tt_sid");sid=null;S=null;$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
+$("editBoard").onclick=e=>{const b=e.target.closest(".c");if(!b)return;const p=+b.dataset.p;keypad("Set position "+p,["?","--"],k=>{setup.board[p-1]=k;drawEdit()})};
+$("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{setup.waste=k;drawEdit()});
+$("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(23,setup.stock+1);drawEdit()};
+$("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}setup.board=t.map(x=>x.toUpperCase());drawEdit();msg("Board set from text.")};
+$("photoBtn").onclick=()=>$("photo").click();
+$("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Reading photo…");$("photoNote").textContent="";
+  const fd=new FormData();fd.append("file",f);fd.append("corners","");
+  try{const r=await post("/api/photo",fd,{form:true,timeout:90000});
+    if(!r.ok){msg(r.message,"err");return}
+    setup.board=r.board;if(r.waste)setup.waste=r.waste;drawEdit();$("photoNote").textContent=r.note;msg("Photo read. Check the cards below, then set the stock and Start.")}
+  catch(e){msg("Could not upload the photo. Try again.","err")}$("photo").value=""};
+$("startBtn").onclick=async()=>{if(busy)return;if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
+  busy=true;msg("");
+  try{const r=await post("/api/new",{board:setup.board.join(" "),waste:setup.waste,stock:setup.stock});busy=false;
+    if(!r.ok){msg(r.message,"err");return}
+    sid=r.sid;sessionStorage.setItem("tt_sid",sid);S=r;draw();msg(r.pending&&r.pending.length?"Tap each yellow ? and pick the card.":"")}
+  catch(e){busy=false;msg("Could not reach the server. Try again.","err")}};
+(async()=>{
+  const g=await (await fetch("/api/geo")).json();geo=g.geo;aspect=g.aspect;drawEdit();
+  if(sid){try{const r=await post("/api/act",{sid,op:"state"});if(r.gone){sessionStorage.removeItem("tt_sid");sid=null}else{S=r;draw()}}catch(e){}}
+})();
+</script></body></html>
