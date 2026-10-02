@@ -625,6 +625,192 @@ def read_rank(prompt):
             print(error)
 
 
+class UndoRequested(Exception):
+    """Raised by an in-game prompt when the user types undo."""
+
+
+def read_rank_undoable(prompt):
+    """Like read_rank, but 'undo' or 'u' goes back one step."""
+
+    while True:
+
+        raw = input(prompt)
+
+        if raw.strip().lower() in ("undo", "u"):
+            raise UndoRequested
+
+        try:
+            card = normalize(raw)
+        except ValueError as error:
+            print(error)
+            continue
+
+        if card in ("?", "--"):
+            print("Please enter an actual card rank.")
+            continue
+
+        return card
+
+
+CORRECTION_HELP = "fix <pos> <rank> / waste <rank> / stock <n> <rank>"
+
+
+def apply_correction(line, board, waste, stock, stock_known):
+    """Parse one correction command and return (board, waste, stock).
+
+    Inputs are not modified. Raises ValueError for anything unrecognised or
+    out of range.
+    """
+
+    board = list(board)
+    stock = list(stock) if stock_known else stock
+    command = line[0].lower()
+
+    if command == "fix" and len(line) == 3:
+        position = int(line[1])
+        if not 1 <= position <= TOTAL_TABLEAU:
+            raise ValueError(f"position must be 1-{TOTAL_TABLEAU}")
+        board[position - 1] = normalize(line[2])
+    elif command == "waste" and len(line) == 2:
+        waste = normalize(line[1])
+    elif command == "stock" and len(line) == 3 and stock_known:
+        index = int(line[1])
+        if not 1 <= index <= len(stock):
+            raise ValueError(f"stock index must be 1-{len(stock)}")
+        stock[index - 1] = normalize(line[2])
+    else:
+        raise ValueError("unrecognised correction")
+
+    return board, waste, stock
+
+
+def overfull_report(board, waste, stock_known, stock):
+    """Describe every rank entered more than four times, or return []."""
+
+    places = {}
+
+    for position, card in enumerate(board, start=1):
+        if card in RANKS:
+            places.setdefault(card, []).append(f"position {position:02d}")
+
+    places.setdefault(waste, []).append("waste")
+
+    if stock_known:
+        for index, card in enumerate(stock, start=1):
+            places.setdefault(card, []).append(f"stock {index}")
+
+    return [
+        f"{rank} was entered {len(where)} times (a deck has "
+        f"{COPIES_PER_RANK}): " + ", ".join(where)
+        for rank, where in places.items()
+        if len(where) > COPIES_PER_RANK
+    ]
+
+
+def repair_entry(board, waste, stock_known, stock, read_line=input, emit=print):
+    """Build the Game, letting the user correct entry mistakes in place.
+
+    Instead of failing and restarting 50-odd ranks, show where the problem
+    is and accept the same fix/waste/stock commands used after setup.
+    """
+
+    while True:
+
+        problems = overfull_report(board, waste, stock_known, stock)
+
+        if not problems:
+            try:
+                return Game(board, waste, stock_known, stock)
+            except ValueError as error:
+                problems = [str(error)]
+
+        emit()
+        emit("The entered cards cannot be a real deck:")
+
+        for problem in problems:
+            emit("  " + problem)
+
+        emit("Correct the mistyped card with: " + CORRECTION_HELP)
+
+        line = read_line("Correction: ").split()
+
+        if not line:
+            continue
+
+        try:
+            board, waste, stock = apply_correction(
+                line, board, waste, stock, stock_known
+            )
+        except ValueError as error:
+            emit(f"Not changed: {error}")
+
+
+def review_setup(game, read_line=input, emit=print):
+    """Let the user fix a mistyped entry before play starts.
+
+    Enter (or end of input) starts the game. Commands:
+        fix <position> <rank>   e.g. fix 07 K   (also -- for cleared, ? for unknown)
+        waste <rank>
+        stock <index> <rank>    known stock only, 1 = next card drawn
+    Returns the (possibly corrected) game. A rejected correction leaves the
+    game unchanged.
+    """
+
+    import tritowers_cli
+
+    while True:
+
+        emit()
+        emit(tritowers_cli.format_board(game))
+        if game.stock_known:
+            emit("Stock order: " + " ".join(game.stock))
+
+        try:
+            line = read_line(
+                "Enter to start, or fix <pos> <rank> / waste <rank> / "
+                "stock <n> <rank>: "
+            ).split()
+        except EOFError:
+            return game
+
+        if not line:
+            return game
+
+        try:
+            board, waste, stock = apply_correction(
+                line, game.board, game.waste, game.stock, game.stock_known
+            )
+            game = Game(board, waste, game.stock_known, stock)
+
+        except ValueError as error:
+            emit(f"Not changed: {error}")
+
+
+def checkpoint(history, game, rng):
+    """Save the game and the sampler state so undo erases a step completely."""
+
+    history.checkpoint(game)
+    history._states[-1].rng_state = rng.getstate()
+
+
+def rewind(history, rng=None):
+    """Return the game to the start of the previous step.
+
+    The newest checkpoint is the start of the step that is in progress, so it
+    is discarded. With no earlier step, the current step simply restarts.
+    """
+
+    current = history.undo()
+    target = history.undo() if history.can_undo() else current
+
+    state = getattr(target, "rng_state", None)
+
+    if rng is not None and state is not None:
+        rng.setstate(state)
+
+    return target
+
+
 # ======================================================================
 # STARTUP EXPLANATION
 # ======================================================================
@@ -945,38 +1131,10 @@ Enter all 23 cards on ONE line.
         stock_known = False
 
     # ------------------------------------------------------------------
-    # VALIDATE DECK
+    # VALIDATE DECK (mistakes are corrected in place, not restarted)
     # ------------------------------------------------------------------
 
-    board_counts = Counter(
-        card
-        for card in board
-        if card in RANKS
-    )
-
-    board_counts[waste] += 1
-
-    if stock_known:
-
-        for card in stock:
-            board_counts[card] += 1
-
-    for rank in RANKS:
-
-        if board_counts[rank] > COPIES_PER_RANK:
-
-            raise ValueError(
-                f"Too many copies of {rank} "
-                f"were entered. A standard deck has "
-                f"only four."
-            )
-
-    return Game(
-        board,
-        waste,
-        stock_known,
-        stock
-    )
+    return repair_entry(board, waste, stock_known, stock)
 
 
 # ======================================================================
@@ -1347,21 +1505,31 @@ def main(argv=None):
     import tritowers_cli
 
     args = tritowers_cli.build_parser().parse_args(argv)
-    rng = random.Random(args.seed) if args.seed is not None else None
-    game = setup(skip_tutorial=args.skip_tutorial)
+    # Always an explicit generator so undo can restore its state.
+    rng = random.Random(args.seed)
+    game = review_setup(setup(skip_tutorial=args.skip_tutorial))
 
     print()
     print("=" * 72)
     print("                         SOLVER ACTIVE")
     print("=" * 72)
 
+    history = tritowers_cli.UndoHistory()
+
     while True:
+
+        checkpoint(history, game, rng)
 
         # --------------------------------------------------------------
         # Ask for newly exposed unknown cards.
         # --------------------------------------------------------------
 
-        reveal_unknowns(game)
+        try:
+            reveal_unknowns(game, read_card=read_rank_undoable)
+        except UndoRequested:
+            game = rewind(history, rng)
+            print("Undid the last step.")
+            continue
 
         print()
         print(tritowers_cli.format_board(game))
@@ -1411,7 +1579,11 @@ def main(argv=None):
 
                 return
 
-            draw(game)
+            try:
+                draw(game, read_card=read_rank_undoable)
+            except UndoRequested:
+                game = rewind(history, rng)
+                print("Undid the last step.")
 
             continue
 
