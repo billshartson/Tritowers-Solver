@@ -19,7 +19,7 @@ Options: `--seed` seeds the sampling, so the same entries and seed give the same
 
 ## Test
 
-    python3 -m unittest -v test_solver.py test_cli.py test_perf_equiv.py test_setup_stock.py test_time_budget.py test_heuristic_baseline.py test_e2e_cli.py
+    python3 -m unittest -v test_solver.py test_cli.py test_perf_equiv.py test_setup_stock.py test_time_budget.py test_heuristic_baseline.py test_e2e_cli.py test_stock_empty.py
 
 `test_e2e_cli.py` drives the real `solver.py` through stdin. `python tools/heuristic_baseline.py --deals 10000 --seed 11` compares the move heuristic with simple policies.
 
