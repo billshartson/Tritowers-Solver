@@ -23,12 +23,18 @@ def draft_to_board_text(draft):
 
 def inspect_image(path, corners_text):
     if not path: return None, None, {"unsupported_reason": "no_image"}, {}, "", "", "Upload an image first."
-    ex = extract_screen(path, parse_corners(corners_text))
+    manual = parse_corners(corners_text)
+    ex = extract_screen(path, manual)
+    fallback = False
+    if manual is None and ex.rectified is None:
+        w, h = ex.normalized.size
+        ex = extract_screen(path, [(0, 0), (w, 0), (w, h), (0, h)]); fallback = True
     result = recognize(ex.rectified, ex.corners, ex.manual).to_dict()
     if ex.rectified is None or not TEMPLATES:
         return ex.overlay, ex.rectified, result, {"note": "Calibrated pass unavailable: no rectified screen or no templates (set TT_TEMPLATES)."}, "", "", "No draft."
     d = read(ex.rectified, TEMPLATES); board, waste = draft_to_board_text(d)
     msg = ("Review needed on: " + ", ".join(d["needs_human_review"]) if d["needs_human_review"] else "No flagged slots") + ". Suit is not read; stock counter is not read - enter it yourself (HUD may show engine stock + 1; unverified)."
+    if fallback: msg = "Screen not auto-detected: treated the whole image as the screen (full-frame). " + msg
     return ex.overlay, ex.rectified, result, d, board, waste, msg
 
 def start(board, waste, stock):
@@ -69,7 +75,7 @@ with gr.Blocks(title="TriTowers") as demo:
         rbtn.click(reveal, [session, rpos, rrank], outs); dbtn.click(draw, [session, drank], outs); undo_btn.click(undo, [session], outs)
     with gr.Tab("Photo to board"):
         upload = gr.Image(type="filepath", label="Quiz-machine photo or screenshot")
-        corners = gr.Textbox(label="Optional manual screen corners (x,y x4); 0,0,W,0,W,H,0,H for an already-cropped screen")
+        corners = gr.Textbox(label="Optional manual screen corners (x,y x4). Leave blank: if the screen is not found, the whole image is used (right for a screenshot of the machine screen - paste the full photo)")
         go = gr.Button("Read photo", variant="primary"); note = gr.Markdown()
         with gr.Row(): overlay = gr.Image(label="Detected screen"); rectified = gr.Image(label="Rectified screen")
         pboard = gr.Textbox(label="Draft board (edit before use)", lines=3); pwaste = gr.Textbox(label="Draft waste")
