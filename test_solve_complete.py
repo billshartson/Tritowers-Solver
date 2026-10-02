@@ -111,6 +111,12 @@ class T(unittest.TestCase):
                 h.draw_known() if m[0] == "draw" else h.play(m[1])
                 rest = solve_complete(h)
                 self.assertEqual(rest.status, "solved", (m, rest.reason))
+    def test_none_and_wrong_type_fields_are_incomplete(self):
+        b, w, s = next(deals(7, 1))
+        for field, val in (("removed", None), ("board", None), ("stock", None), ("stock", 5), ("removed", 7), ("board", [None] * 28), ("stock_known", None)):
+            g = Game(b, w, True, s); setattr(g, field, val)
+            r = solve_complete(g)
+            self.assertIn(r.status, ("incomplete",), (field, val, r))
     def test_draw_known(self):
         b, w, s = next(deals(2, 1)); g = Game(b, w, True, s)
         self.assertEqual(g.draw_known(), s[0]); self.assertEqual(g.waste, s[0]); self.assertEqual(len(g.stock), 22)
