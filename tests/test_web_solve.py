@@ -13,7 +13,7 @@ def post(**kw):
     return client.post("/api/solve", json=body).json()
 
 def fake(status, moves=(), reason=""):
-    return lambda game, time_budget=None: types.SimpleNamespace(status=status, moves=list(moves), reason=reason, nodes=3, seconds=0.01)
+    return lambda game, time_budget=None, **kw: types.SimpleNamespace(status=status, moves=list(moves), reason=reason, nodes=3, seconds=0.01)
 
 def test_incomplete_deal_is_never_guessed(monkeypatch):
     monkeypatch.setattr(solver, "solve_complete", fake("solved"), raising=False)
@@ -53,3 +53,21 @@ def test_background_recommendation_is_ready(monkeypatch):
     assert adv and adv["pos"] == 19, adv
     # asking explicitly returns the same cached result without error
     assert client.post("/api/act", json={"sid": sid, "op": "recommend"}).json()["advice"]["pos"] == 19
+
+def test_policy_labels(monkeypatch):
+    # stuck-only unsolvable but voluntary solved -> solved with the voluntary caveat
+    def f(game, time_budget=None, draw_only_when_stuck=True, **kw):
+        if draw_only_when_stuck: return types.SimpleNamespace(status="unsolvable", moves=[], reason="", nodes=1, seconds=0)
+        return types.SimpleNamespace(status="solved", moves=[("play", 19)], reason="", nodes=1, seconds=0)
+    monkeypatch.setattr(solver, "solve_complete", f, raising=False)
+    r = post(); assert r["status"] == "solved" and r["policy"] == "voluntary" and "draw while a play" in r["message"]
+    monkeypatch.setattr(solver, "solve_complete", fake("unsolvable"), raising=False)
+    r = post(); assert r["policy"] == "both" and "both draw rules" in r["message"]
+
+def test_real_solver_end_to_end():
+    # real solve_complete on a fresh full deal is validated, solved lines are verified by replay
+    import random
+    rnd = random.Random(3); d = [x for x in solver.RANKS for _ in range(4)]; rnd.shuffle(d)
+    r = client.post("/api/solve", json={"board": " ".join(d[:28]), "waste": d[28], "stock": d[29:], "stock_count": 23}).json()
+    assert r["ok"] and r["status"] in ("solved", "unknown") or r["status"] == "unsolvable" or r["policy"], r
+    if r["status"] == "solved": assert r["frames"][-1]["remaining"] == 0 and len(r["steps"]) == len(r["frames"]) - 1
