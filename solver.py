@@ -366,6 +366,11 @@ class Game:
         """Number of stock cards remaining, independent of stock mode."""
         return len(self.stock) if self.stock_known else self.stock
 
+    @property
+    def stock_empty(self):
+        """True when no stock card can be drawn, in either stock mode."""
+        return not self.stock if self.stock_known else self.stock <= 0
+
     def state_snapshot(self):
         """Stable read-only-shaped state for CLIs and display adapters."""
         return {
@@ -440,7 +445,7 @@ class Game:
     def observe_draw(self, card):
         if self.stock_known:
             raise ValueError("Cannot manually observe a known stock.")
-        if self.stock <= 0:
+        if self.stock_empty:
             raise ValueError("The stock is empty.")
         card = self.observe_rank(card)
         self.stock -= 1
@@ -1018,7 +1023,7 @@ def draw(game, read_card=read_rank, emit=print):
 
     if game.stock_known:
 
-        if not game.stock:
+        if game.stock_empty:
             return False
 
         card = game.stock.pop(0)
@@ -1033,7 +1038,7 @@ def draw(game, read_card=read_rank, emit=print):
     # UNKNOWN STOCK
     # ------------------------------------------------------------------
 
-    if game.stock <= 0:
+    if game.stock_empty:
         return False
 
     # The user only tells us what card actually appeared.
@@ -1166,9 +1171,7 @@ def simulate(
     # --------------------------------------------------------------
 
     # Every iteration either removes a tableau card or consumes a stock card.
-    max_transitions = g.remaining() + (
-        len(g.stock) if g.stock_known else g.stock
-    )
+    max_transitions = g.remaining() + g.stock_remaining
     for _ in range(max_transitions):
 
         # ----------------------------------------------------------
@@ -1232,19 +1235,15 @@ def simulate(
         # No tableau move: draw.
         # ----------------------------------------------------------
 
+        if g.stock_empty:
+
+            return False
+
         if g.stock_known:
-
-            if not g.stock:
-
-                return False
 
             g.waste = g.stock.pop(0)
 
         else:
-
-            if g.stock <= 0:
-
-                return False
 
             g.stock -= 1
 
@@ -1391,17 +1390,7 @@ def main(argv=None):
 
         if not moves:
 
-            if (
-                (
-                    game.stock_known
-                    and not game.stock
-                )
-                or
-                (
-                    not game.stock_known
-                    and game.stock <= 0
-                )
-            ):
+            if game.stock_empty:
 
                 print()
                 print(
