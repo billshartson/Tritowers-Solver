@@ -68,7 +68,7 @@ SOLVER BEHAVIOUR
 import random
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -451,6 +451,15 @@ class Game:
         self.stock -= 1
         self.waste = card
         return card
+
+    def draw_known(self):
+        """Draw the next card of a known stock (index 0) onto the waste and return it."""
+        if not self.stock_known:
+            raise ValueError("Stock order is not known.")
+        if not self.stock:
+            raise ValueError("The stock is empty.")
+        self.waste = self.stock.pop(0)
+        return self.waste
 
     # ------------------------------------------------------------------
     # TABLEAU REMAINING
@@ -1498,6 +1507,113 @@ def best_move(game, simulations=SIMULATIONS, rng=None, time_budget=None):
 # ======================================================================
 # MAIN GAME LOOP
 # ======================================================================
+
+# ======================================================================
+# EXACT SOLVER FOR A COMPLETE DEAL
+# ======================================================================
+
+@dataclass(frozen=True)
+class SolveResult:
+    """status: solved | unsolvable | unknown | incomplete.
+
+    moves: list of ("play", position) or ("draw",) steps; only set when solved.
+    unsolvable means the search was exhaustive under this module's rules; budgets give unknown.
+    """
+    status: str
+    moves: list = field(default_factory=list)
+    reason: str = ""
+    nodes: int = 0
+    seconds: float = 0.0
+
+
+class _Budget(Exception):
+    pass
+
+
+def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_000,
+                   draw_only_when_stuck=True, require_full_deal=False):
+    """Exact search over a fully known deal: every tableau card, the waste and the ordered stock.
+
+    Does not mutate ``game``. Rules come from can_play, ACE_WRAP and BLOCKERS above.
+
+    Input is a known POSITION, possibly mid-game (some tableau cards removed, a short stock); only the
+    4-per-rank and 52-card ceilings are checked. Pass require_full_deal=True for a fresh deal
+    (28 tableau + waste + 23 stock = 52, nothing removed), otherwise status "incomplete".
+    draw_only_when_stuck=True matches the CLI (a draw only when no tableau card is playable);
+    False also allows a voluntary draw. Which one the real machine uses is unverified, and
+    "unsolvable" holds only for the chosen setting.
+    """
+    t0 = time.monotonic()
+    done = lambda status, moves=(), reason="", nodes=0: SolveResult(
+        status, list(moves), reason, nodes, round(time.monotonic() - t0, 4))
+    if not game.stock_known:
+        return done("incomplete", reason="unknown_stock")
+    if any(c == "?" for p, c in enumerate(game.board, 1) if p not in game.removed):
+        return done("incomplete", reason="unknown_cards")
+    # Game fields are mutable, so re-validate rather than trust the constructor.
+    try:
+        if any(c == "?" for c in game.board):
+            return done("incomplete", reason="unknown_cards")
+        removed = set(game.removed)
+        # Game.play leaves a played card on the board and also on the waste: count it once.
+        validate_deal(["--" if p in removed else c for p, c in enumerate(game.board, 1)],
+                      game.waste, True, game.stock)
+        if any(not isinstance(p, int) or isinstance(p, bool) or not 1 <= p <= TOTAL_TABLEAU for p in removed):
+            raise ValueError("removed has invalid positions")
+        if any(p not in removed for p, c in enumerate(game.board, 1) if c == "--"):
+            raise ValueError("board has cleared slots not in removed")
+        if any(not BLOCKER_SETS[p] <= removed for p in removed):
+            raise ValueError("removed card is still covered")
+        if require_full_deal and (removed or len(game.stock) != 23):
+            return done("incomplete", reason="not_full_deal")
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        return done("incomplete", reason=f"invalid_deal: {exc}")
+    board, stock = list(game.board), list(game.stock)
+    n, full = len(stock), (1 << TOTAL_TABLEAU) - 1
+    need = [sum(1 << (b - 1) for b in BLOCKER_SETS[p]) for p in range(1, TOTAL_TABLEAU + 1)]
+    start = sum(1 << (p - 1) for p in removed)
+    deadline = t0 + time_budget if time_budget is not None else None
+    memo, nodes, calls, why = {}, [0], [0], [""]
+    if deadline is not None and time_budget <= 0:
+        return done("unknown", reason="timeout")
+
+    def go(rem, w, i):
+        if rem == full:
+            return ()
+        calls[0] += 1
+        if deadline is not None and (calls[0] & 255) == 0 and time.monotonic() > deadline:
+            why[0] = "timeout"; raise _Budget
+        key = (rem, w, i)
+        if key in memo:
+            return memo[key]
+        nodes[0] += 1
+        if nodes[0] > max_nodes:
+            why[0] = "node_limit"; raise _Budget
+        if len(memo) >= max_memo:
+            why[0] = "memory_limit"; raise _Budget
+        res = None
+        playable = False
+        for p in range(TOTAL_TABLEAU):
+            if rem >> p & 1 or need[p] & ~rem or not can_play(board[p], w):
+                continue
+            playable = True
+            r = go(rem | 1 << p, board[p], i)
+            if r is not None:
+                res = (("play", p + 1),) + r
+                break
+        if res is None and i < n and not (draw_only_when_stuck and playable):
+            r = go(rem, stock[i], i + 1)
+            if r is not None:
+                res = (("draw",),) + r
+        memo[key] = res
+        return res
+
+    try:
+        res = go(start, game.waste, 0)
+    except _Budget:
+        return done("unknown", reason=why[0], nodes=nodes[0])
+    return done("unsolvable" if res is None else "solved", res or (), nodes=nodes[0])
+
 
 def main(argv=None):
 
