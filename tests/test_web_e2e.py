@@ -11,6 +11,8 @@ TEMPLATES = os.environ.get("TT_TEMPLATES")
 
 @pytest.fixture(scope="module")
 def server():
+    if os.environ.get("TT_BASE_URL"):          # post-deploy run against a live URL
+        yield os.environ["TT_BASE_URL"].rstrip("/"); return
     with socket.socket() as s: s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
     p = subprocess.Popen([sys.executable, "web_app.py"], cwd=ROOT, env={**os.environ, "PORT": str(port)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}"
@@ -37,7 +39,9 @@ def start_game(page, url, waste="K"):
 
 def reveal_all(page, ranks="2 A 3 7 9 J 5 3 9 3".split()):
     for r in ranks:
-        page.click("#board .c.ask >> nth=0"); page.click(f'#keys button[data-k="{r}"]'); page.wait_for_function("!document.getElementById('msg').textContent.startsWith('Thinking')")
+        n = page.locator("#board .c.ask").count()
+        page.click("#board .c.ask >> nth=0"); page.click(f'#keys button[data-k="{r}"]')
+        page.wait_for_function(f"document.querySelectorAll('#board .c.ask').length<{n}", timeout=30000)
 
 @pytest.mark.parametrize("vp", VIEWPORTS)
 def test_full_flow(server, browser, vp):
