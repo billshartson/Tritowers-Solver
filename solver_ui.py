@@ -75,14 +75,19 @@ def status(session):
     if not g.legal_moves(): return "No playable card. Draw from the stock." if g.stock_remaining > 0 else "No moves and the stock is empty."
     return "Ready for a recommendation."
 
-def recommend(session, simulations=solver.SIMULATIONS, seed=None):
+def recommend_detail(session, simulations=solver.SIMULATIONS, seed=None):
+    """Return (text, position|None, proven|None, rate|None, sims)."""
     guard_open(session)
     sims = to_int(simulations, "Simulations", 1, 100000)
     rng = random.Random(to_int(seed, "Seed")) if seed not in (None, "") else None
     rec = solver.best_move(session.game, simulations=sims, rng=rng, time_budget=RECOMMEND_TIME_BUDGET)
-    if rec is None: return "No legal move: draw from the stock." if session.game.stock_remaining else "No legal move and stock empty."
-    if rec.is_proven: return f"Play position {rec.position:02d}. Proven: this move is guaranteed by the known cards."
-    return f"Play position {rec.position:02d}. Sampled estimate {rec.success_rate:.0%} over {rec.simulations} simulations. This is an estimate, not a proof."
+    if rec is None:
+        return ("No legal move: draw from the stock." if session.game.stock_remaining else "No legal move and stock empty."), None, None, None, 0
+    if rec.is_proven: return f"Play position {rec.position:02d}. Proven: this move is guaranteed by the known cards.", rec.position, True, 1.0, 0
+    return (f"Play position {rec.position:02d}. Sampled estimate {rec.success_rate:.0%} over {rec.simulations} simulations. This is an estimate, not a proof."), rec.position, False, rec.success_rate, rec.simulations
+
+def recommend(session, simulations=solver.SIMULATIONS, seed=None):
+    return recommend_detail(session, simulations, seed)[0]
 
 def do_play(session, position):
     position = to_int(position, "Position", 1, 28); guard_open(session)

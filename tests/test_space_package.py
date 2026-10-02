@@ -15,7 +15,7 @@ class SpacePackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             target = PACKAGE.stage(Path(temporary) / "space")
             self.assertEqual({p.name for p in target.iterdir()},
-                             {*PACKAGE.FILES, "README.md", "tritowers_vision"})
+                             {*PACKAGE.FILES, "README.md", "tritowers_vision", "web"})
             self.assertEqual((target / "README.md").read_bytes(),
                              (ROOT / "README-SPACE.md").read_bytes())
             for name in PACKAGE.FILES:

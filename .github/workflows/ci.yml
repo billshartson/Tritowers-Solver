@@ -29,3 +29,17 @@ jobs:
         run: |
           python -m pip install pytest
           python -m pytest -q tests/test_solver_ui.py tests/test_space_package.py
+  browser:
+    name: Browser end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -r requirements.txt pytest playwright
+          python -m playwright install --with-deps chromium
+      - name: Browser tests
+        run: TT_CHROME= python -m pytest -q tests/test_web_e2e.py
