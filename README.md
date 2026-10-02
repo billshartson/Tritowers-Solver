@@ -15,7 +15,9 @@ Options: `--seed` seeds the sampling, so the same entries and seed give the same
 1. Say whether you know all 28 tableau cards and whether you know the stock order.
 2. Enter ranks (`A 2 ... 10 J Q K`), use `--` for already-cleared positions.
 3. The solver prints the board each turn, then `PLAY <card> @ <position>` with `[GUARANTEED]` or the sampled win rate and run count. Enter any newly exposed or drawn card when asked.
-4. Ctrl-D ends the session cleanly.
+4. After setup the board is shown once more. Press Enter to start, or correct a mistyped entry first: `fix 07 K` (position, rank; `--` cleared, `?` unknown), `waste Q`, or `stock 5 9` (known stock only, 1 = next card drawn). A correction that breaks the deck rules is rejected and nothing changes.
+5. Type `undo` (or `u`) at a card prompt to go back one step: it returns to the start of the previous step (or restarts the current one if it is the first), and you re-enter from there. The sampler state is restored too, so after undo the session replays as if the step had not happened (same seed, same entries). Undo does not apply during setup, use the correction step above.
+6. Ctrl-D ends the session cleanly.
 
 ## Test
 
@@ -23,4 +25,4 @@ Options: `--seed` seeds the sampling, so the same entries and seed give the same
 
 `test_e2e_cli.py` drives the real `solver.py` through stdin. `python tools/heuristic_baseline.py --deals 10000 --seed 11` compares the move heuristic with simple policies.
 
-Not done yet: undo is implemented in `tritowers_cli.UndoHistory` but not wired into the prompts.
+If setup cards cannot be a real deck (a rank entered more than four times), the solver says where, for example `K was entered 5 times: position 01, position 07 ...`, and asks for a correction with the same `fix` / `waste` / `stock` commands instead of making you start over. Ctrl-D still ends the session.
