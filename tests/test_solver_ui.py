@@ -53,7 +53,7 @@ def test_recommend_passes_time_budget(monkeypatch):
 def test_three_tower_geometry():
     h = ui.render_board(ui.new_session(BOARD, "K", 23))
     import re
-    pos = {int(m.group(3)): (int(m.group(1)), int(m.group(2))) for m in re.finditer(r'left:(\d+)px;top:(\d+)px" class="c [^"]*"><small>(\d+)', h)}
+    pos = {int(m.group(3)): (float(m.group(1)), float(m.group(2))) for m in re.finditer(r'left:([0-9.]+)%;top:([0-9.]+)%" class="c [^"]*"><small>(\d+)', h)}
     assert len(pos) == 28
     assert pos[2][0] > pos[1][0] and pos[3][0] > pos[2][0]
     assert pos[1][1] == pos[2][1] == pos[3][1] < pos[4][1]
