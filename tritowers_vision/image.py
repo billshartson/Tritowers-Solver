@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import BinaryIO,Iterable
 import cv2,numpy as np
 from PIL import Image,ImageOps,UnidentifiedImageError
+try:
+    from pillow_heif import register_heif_opener; register_heif_opener()  # iPhone HEIC/HEIF photos
+except ImportError: pass
 MAX_BYTES=12*1024*1024; MAX_PIXELS=20_000_000; MIN_SIDE=160; MIN_QUAD_AREA=1000.0; MIN_EDGE=20.0; OUTPUT_SIZE=(1024,768); ALLOWED_FORMATS={"JPEG","PNG","WEBP","HEIF","HEIC"}
 class ImageInputError(ValueError): pass
 @dataclass(frozen=True)

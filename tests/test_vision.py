@@ -25,3 +25,12 @@ class VisionTests(unittest.TestCase):
     def test_hidden_slot_no_rank(self):
         with self.assertRaises(ValueError):SlotObservation("t1",((0,0),(1,0),(1,1),(0,1)),(0,0,1,1),SlotState.COVERED,rank="A")
 if __name__=="__main__":unittest.main()
+
+
+def test_heic_decodes_when_plugin_available():
+    import io, pytest
+    from PIL import Image
+    pytest.importorskip("pillow_heif")
+    buf = io.BytesIO(); Image.new("RGB", (320, 240), (10, 120, 60)).save(buf, "HEIF")
+    out = normalize_image(buf.getvalue())
+    assert out.size == (320, 240) and out.mode == "RGB"
