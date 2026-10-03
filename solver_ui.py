@@ -1,5 +1,5 @@
 """Friendly Gradio front end for the rank-only solver. Rules stay in solver.py; this only presents them."""
-import random, html
+import random, html, time
 import solver
 ROWS = ((1, 2, 3), tuple(range(4, 10)), tuple(range(10, 19)), tuple(range(19, 29)))
 
@@ -74,6 +74,64 @@ def status(session):
     if g.remaining() == 0: return "Tableau cleared."
     if not g.legal_moves(): return "No playable card. Draw from the stock." if g.stock_remaining > 0 else "No moves and the stock is empty."
     return "Ready for a recommendation."
+
+ESTIMATE_SAMPLES = 400
+ESTIMATE_BUDGET = 8.0   # seconds of wall clock for the whole estimate
+SOLVE_BUDGET = 0.25     # per exact solve; an undecided sample counts as NOT winnable
+
+def _completion(game, pool, hidden, rng):
+    """One random full completion of the hidden tableau cards and the unknown stock order."""
+    cards = pool[:]; rng.shuffle(cards)
+    g = game.copy(); k = 0
+    for i in hidden: g.board[i] = cards[k]; k += 1
+    if not g.stock_known: g.stock = cards[k:]; g.stock_known = True
+    return g
+
+def estimate_moves(game, moves, samples=ESTIMATE_SAMPLES, budget=ESTIMATE_BUDGET, rng=None):
+    """Sample random completions of the hidden cards and exactly solve each one after each candidate move.
+
+    Returns None when the card counts are inconsistent. Otherwise {pos: {"won","lost","unknown","n"}}.
+    Each completion is a full-information game, so the result assumes perfect foresight: an estimate of
+    the share of completions that are winnable after the move, not a bound and not a playable plan.
+    Draws only when stuck (valid under both draw rules). Undecided solves are counted as not winnable.
+    """
+    rng = rng or random.Random()
+    hidden = [i for i, c in enumerate(game.board) if c == "?" and (i + 1) not in game.removed]
+    pool = game.unknown_card_pool()
+    stock_n = 0 if game.stock_known else game.stock_remaining
+    if len(pool) != len(hidden) + stock_n: return None
+    stats = {p: {"won": 0, "lost": 0, "unknown": 0, "n": 0} for p in moves}
+    deadline = time.monotonic() + budget; done = 0
+    single = not hidden and game.stock_known
+    while done < (1 if single else samples) and (done < 20 or time.monotonic() < deadline):
+        comp = _completion(game, pool, hidden, rng); done += 1
+        for p in moves:
+            g = comp.copy()
+            try: g.play(p)
+            except Exception: continue
+            r = solver.solve_complete(g, time_budget=SOLVE_BUDGET, draw_only_when_stuck=True)
+            st = stats[p]; st["n"] += 1
+            if r.status == "solved": st["won"] += 1
+            elif r.status == "unsolvable": st["lost"] += 1
+            else: st["unknown"] += 1
+    return stats
+
+def foresight_line(session, position, seed=None):
+    """Separate, clearly labelled perfect-information estimate for one candidate move (never a bound or a plan)."""
+    g = session.game
+    rng = random.Random(to_int(seed, "Seed")) if seed not in (None, "") else None
+    stats = estimate_moves(g, [position], rng=rng)
+    if stats is None: return None
+    st = stats[position]; n = st["n"]
+    if not n: return None
+    known = not any(c == "?" for c in g.board) and g.stock_known
+    if known:
+        if st["won"]: return "Exact: with every card known, a winning line exists after this move (draws only when stuck)."
+        if st["unknown"]: return "Could not decide this position in the time limit; not a proof either way."
+        return "Exact: with every card known, no winning line exists after this move (draws only when stuck)."
+    extra = f" {st['unknown']} undecided samples are counted as not winnable." if st["unknown"] else ""
+    return (f"Perfect-information view: winnable in {st['won'] / n:.0%} of {n} sampled completions of the hidden cards, assuming perfect foresight "
+            f"and draws only when stuck. An estimate, not a bound or a plan, and optimistic compared with real play.{extra}")
 
 def recommend_detail(session, simulations=solver.SIMULATIONS, seed=None):
     """Return (text, position|None, proven|None, rate|None, sims)."""
