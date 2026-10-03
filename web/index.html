@@ -38,7 +38,8 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
  <p class="sub" id="modeHelp">Cards covered on the table stay hidden; I will ask for each one as it is uncovered.</p>
  <div class="panel"><div class="lbl">1. Read from a photo (optional)</div>
   <div class="row"><button class="b" id="photoBtn" type="button">Choose photo of the machine screen</button></div><input id="photo" type="file" accept="image/*" hidden>
-  <div id="photoNote" class="sub" style="margin-top:8px"></div></div>
+  <div id="photoNote" class="sub" style="margin-top:8px"></div>
+  <img id="photoView" alt="What the photo reader saw: green read, yellow check, red covered, grey empty" hidden style="display:block;width:100%;margin-top:8px;border-radius:6px"></div>
  <div class="panel"><div class="lbl">2. Cards on the table (tap a card to set it; red = face-down)</div>
   <div class="tw"><div class="towers" id="editBoard"></div></div>
   <p class="sub">The 10 cards on the bottom row are face-up. Enter them here, or just press Start and I will ask for each one.</p>
@@ -158,11 +159,13 @@ $("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{setup.waste=k;drawEdit()});
 $("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(23,setup.stock+1);drawEdit()};
 $("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}setup.board=t.map(x=>x.toUpperCase());drawEdit();msg("Board set from text.")};
 $("photoBtn").onclick=()=>$("photo").click();
-$("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Reading photo…");$("photoNote").textContent="";
+$("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Reading photo…");$("photoNote").textContent="";$("photoView").hidden=true;
   const fd=new FormData();fd.append("file",f);fd.append("corners","");
   try{const r=await post("/api/photo",fd,{form:true,timeout:90000});
     if(!r.ok){msg(r.message,"err");return}
-    setup.board=r.board;if(r.waste)setup.waste=r.waste;drawEdit();$("photoNote").textContent=r.note;msg("Photo read. Check the cards below, then set the stock and Start.")}
+    setup.board=r.board;if(r.waste)setup.waste=r.waste;drawEdit();$("photoNote").textContent=r.note;
+    if(typeof r.overlay==="string"&&r.overlay.startsWith("data:image/jpeg;base64,")){$("photoView").src=r.overlay;$("photoView").hidden=false}
+    msg("Photo read. Check the cards below, then set the stock and Start.")}
   catch(e){msg("Could not upload the photo. Try again.","err")}$("photo").value=""};
 $("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
   busy=true;msg("");$("startBtn").textContent="Starting…";

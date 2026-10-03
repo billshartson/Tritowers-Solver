@@ -1,4 +1,6 @@
-"""Calibrated single-skin pass: occupancy + gated rank reading -> solver-input draft.
+"""Calibrated single-skin pass (v2): occupancy + gated rank reading -> solver-input draft.
+
+Superseded by reader.read_photo (v3), which the apps use; kept so tools/vision_eval.py can compare against it.
 
 Rank/suit output is only for face-up cards read above the acceptance gate. Everything else is
 None (unknown). Hidden cards are never inferred. Stock counter is NOT read yet.

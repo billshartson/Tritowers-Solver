@@ -232,34 +232,35 @@ def api_solve(body: dict):
     return out
 
 @app.post("/api/photo")
-async def api_photo(file: UploadFile = File(...), corners: str = Form("")):
-    import tempfile
-    from tritowers_vision.image import extract_screen
-    from tritowers_vision.calibrated import read
-    data = await file.read()
-    if len(data) > 15_000_000: return {"ok": False, "message": "Image is too large (15 MB max)."}
-    if not _templates(): return {"ok": False, "message": "Photo reading is not set up on this server (no templates)."}
-    with tempfile.NamedTemporaryFile(suffix=".img") as tmp:
-        tmp.write(data); tmp.flush()
-        try:
-            manual = None
-            if corners.strip():
-                nums = [float(x) for x in corners.replace(";", ",").split(",") if x.strip()]
-                if len(nums) != 8: return {"ok": False, "message": "Corners need 8 numbers."}
-                manual = [(nums[i], nums[i + 1]) for i in range(0, 8, 2)]
-            ex = extract_screen(tmp.name, manual); fallback = False
-            if manual is None and ex.rectified is None:
-                w, h = ex.normalized.size; ex = extract_screen(tmp.name, [(0, 0), (w, 0), (w, h), (0, h)]); fallback = True
-            if ex.rectified is None: return {"ok": False, "message": "Could not find the screen in that image."}
-            d = read(ex.rectified, _templates())
-        except Exception as e: return {"ok": False, "message": f"Could not read that image: {e}"}
-    tokens = []
-    for i in range(1, 29):
-        c = d["cards"][f"tableau-{i:02d}"]; tokens.append("--" if c["state"] == "empty" else (c["rank"] or "?"))
-    review = d.get("needs_human_review") or []
-    note = ("Whole image used as the screen. " if fallback else "") + ("Check these slots: " + ", ".join(map(str, review)) + ". " if review else "") + \
-           "Suit and the stock counter are not read: set stock yourself. This is a prototype reading - check every card."
-    return {"ok": True, "board": tokens, "waste": d["cards"]["waste"]["rank"] or "", "note": note}
+def api_photo(file: UploadFile = File(...), corners: str = Form("")):
+    """Read a photo or screenshot into a draft board. Sync on purpose: the work is CPU-bound, so it runs in the
+    thread pool instead of blocking the event loop. Never guesses: unread or uncertain cards come back as '?'."""
+    import base64, io
+    from tritowers_vision.image import MAX_BYTES, ImageInputError
+    from tritowers_vision.reader import board_tokens, read_photo
+    data = file.file.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES: return {"ok": False, "message": f"Image is too large ({MAX_BYTES // (1024 * 1024)} MB max)."}
+    manual = None
+    if corners.strip():
+        try: nums = [float(x) for x in corners.replace(";", ",").split(",") if x.strip()]
+        except ValueError: return {"ok": False, "message": "Corners need 8 numbers."}
+        if len(nums) != 8: return {"ok": False, "message": "Corners need 8 numbers."}
+        manual = [(nums[i], nums[i + 1]) for i in range(0, 8, 2)]
+    try:
+        r = read_photo(data, _templates(), manual)
+    except (ImageInputError, ValueError) as e:
+        return {"ok": False, "message": f"Could not read that image: {e}"}
+    d = r.draft; tokens, waste = board_tokens(d)
+    review = [s.replace("tableau-", "").lstrip("0") if s != "waste" else "waste" for s in d["needs_human_review"]]
+    if not d["registration"]["trusted"]:
+        note = "The card layout was not found reliably, so check every card (a straighter photo of the whole screen helps). "
+    else:
+        note = ("Check: " + ", ".join(review) + ". " if review else "")
+    note += "Suit and the stock counter are not read: set the stock yourself. Check the picture before you start."
+    view = r.overlay.copy(); view.thumbnail((900, 900))
+    buf = io.BytesIO(); view.save(buf, format="JPEG", quality=80)
+    return {"ok": True, "board": tokens, "waste": waste, "note": note, "review": review,
+            "trusted": d["registration"]["trusted"], "overlay": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}
 
 if __name__ == "__main__":
     import uvicorn

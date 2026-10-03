@@ -15,7 +15,8 @@ The staging script refuses existing destinations. It copies this runtime manifes
 
 - `app.py`: Gradio entrypoint, with per-browser session state.
 - `solver_ui.py`, `solver.py`, `tritowers_cli.py`: UI adapter and solver imports.
-- `tritowers_vision/`: image extraction and recognition modules, without bytecode.
+- `tritowers_vision/`: image extraction and recognition modules, without bytecode,
+  including the bundled open-font glyph bank `data/font_glyphs.npz`.
 - `requirements.txt`: pinned runtime dependencies.
 - `MODEL_CARD.md`: recognition limitations.
 - `README-SPACE.md` renamed to root `README.md`: Hugging Face SDK metadata.
@@ -52,9 +53,13 @@ or browser acceptance. Run the source tests separately in the full checkout.
 4. Confirm recommendation latency on the chosen CPU. A solver time budget is a
    soft cap, not a strict hosted response deadline; the UI wiring owner handles
    the recommendation cap.
-5. Keep calibrated photo reading unavailable unless separately approved private
-   templates are provided. `TT_TEMPLATES` is an optional local template path,
-   not an account credential. No calibration data is supplied by this package.
+5. Decide how ranks may be read from photos. By default the reader uses private
+   templates when `TT_TEMPLATES` points at them, and otherwise the bundled
+   open-font glyphs (`tritowers_vision/data/font_glyphs.npz`, rendered bitmaps
+   only). Set `TT_FONT_TIER=0` to keep rank reading unavailable without approved
+   private templates (the previous behaviour). `TT_TEMPLATES` is an optional local
+   template path, not an account credential; build it with
+   `tools/build_templates.py` and never upload it with the runtime.
 
 The UI accepts an unknown stock count only. Its undo restores game state, not the
 sampler state or recommendation cache. Do not apply the CLI's stronger undo or

@@ -25,10 +25,13 @@ engine count; translating a quiz-machine HUD count has not been verified.
 
 ## Photo reader limits
 
-Recognition is a one-skin prototype. Always review its draft before copying it
-into the solver. No calibration templates or image corpus are bundled. Without
-private calibration templates, screen extraction remains available but calibrated
-rank reading reports unavailable. Suits and stock counters are not read.
+Recognition is calibrated on one skin. Always review its draft (the picture shows
+what was read) before copying it into the solver. It finds the card layout in
+screenshots, loose crops and phone photos, and reads ranks from private same-skin
+templates (`TT_TEMPLATES`) or, failing that, a bundled set of open-font glyphs.
+Unread or uncertain cards are left as `?` and flagged. Set `TT_FONT_TIER=0` to read
+ranks only from private templates. No photos or photo-derived templates are bundled.
+Suits and stock counters are not read.
 
 ## Runtime
 

@@ -26,3 +26,23 @@ Options: `--seed` seeds the sampling, so the same entries and seed give the same
 `test_e2e_cli.py` drives the real `solver.py` through stdin. `python tools/heuristic_baseline.py --deals 10000 --seed 11` compares the move heuristic with simple policies.
 
 If setup cards cannot be a real deck (a rank entered more than four times), the solver says where, for example `K was entered 5 times: position 01, position 07 ...`, and asks for a correction with the same `fix` / `waste` / `stock` commands instead of making you start over. Ctrl-D still ends the session.
+
+## Photo reader
+
+`app.py` (Gradio, "Photo to board" tab) and `web_app.py` (`/api/photo`, the "Read from a photo" button) turn a
+screenshot or phone photo of the machine screen into a draft board. The reader (`tritowers_vision/reader.py`) finds
+the card layout in the image (no exact crop or screen border needed), decides which cards are still on the table using
+the game rules, reads the rank of every exposed card and the waste card, and returns a picture showing what it read.
+Anything it is not sure of stays `?` and is listed for checking; it never guesses hidden cards, suits or the stock.
+It is calibrated on one skin (see `MODEL_CARD.md`).
+
+- `TT_TEMPLATES=path/templates.json`: private same-skin glyph templates (read first). Build them from labelled images
+  with `python tools/build_templates.py labels.json templates.json`; never commit them.
+- Without templates, ranks come from a bundled bank of open-font glyphs (`tritowers_vision/data/font_glyphs.npz`,
+  rebuilt with `tools/build_font_bank.py`). `TT_FONT_TIER=0` turns that off.
+- Measure changes with `python tools/vision_eval.py --labels labels.json --captures 4` (real labelled images, plus
+  simulated loose crops and phone photos of them) or `--synthetic` (generated screens, `tools/vision_synth.py`).
+  The labels format is in `DATASET.md`.
+
+Tests: `python -m pip install -r requirements.txt pytest httpx`, then
+`python -m pytest -q tests/test_reader.py tests/test_vision.py tests/test_calibrated.py tests/test_rank2.py`.

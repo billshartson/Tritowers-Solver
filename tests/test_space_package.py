@@ -21,6 +21,7 @@ class SpacePackageTests(unittest.TestCase):
             for name in PACKAGE.FILES:
                 self.assertEqual((target / name).read_bytes(), (ROOT / name).read_bytes())
             self.assertTrue((target / "tritowers_vision/__init__.py").is_file())
+            self.assertTrue((target / "tritowers_vision/data/font_glyphs.npz").is_file())
             self.assertFalse(list(target.rglob("*.pyc")))
             self.assertFalse(list(target.rglob("__pycache__")))
             metadata = (target / "README.md").read_text().split("---")[1]
