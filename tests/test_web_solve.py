@@ -71,3 +71,23 @@ def test_real_solver_end_to_end():
     r = client.post("/api/solve", json={"board": " ".join(d[:28]), "waste": d[28], "stock": d[29:], "stock_count": 23}).json()
     assert r["ok"] and r["status"] in ("solved", "unknown") or r["status"] == "unsolvable" or r["policy"], r
     if r["status"] == "solved": assert r["frames"][-1]["remaining"] == 0 and len(r["steps"]) == len(r["frames"]) - 1
+
+
+def test_foresight_line_is_labelled_and_separate():
+    import random, solver_ui as ui
+    rnd = random.Random(5); d = [x for x in solver.RANKS for _ in range(4)]; rnd.shuffle(d)
+    vis = ["?" if p <= 18 else d[p - 1] for p in range(1, 29)]
+    s = ui.Session(solver.Game(vis, d[28], False, 23))
+    text, pos, proven, rate, sims = ui.recommend_detail(s, 200, 1)
+    assert "Winnable" not in text and pos
+    fs = ui.foresight_line(s, pos, 1)
+    assert "perfect foresight" in fs and "not a bound" in fs and "sampled completions" in fs
+    # inconsistent card counts: no estimate rather than a made-up one
+    bad = ui.Session(solver.Game(vis, d[28], False, 22))
+    assert ui.foresight_line(bad, pos, 1) is None
+
+
+def test_malformed_solve_inputs_never_500():
+    for extra in ({"stock_count": "x"}, {"time_budget": "x"}, {"stock": "AAAA"}, {"stock_count": 1.5}, {"stock_count": -1}, {"stock": None}):
+        r = client.post("/api/solve", json={"board": " ".join(BOARD), "waste": "5", "stock": [], **extra})
+        assert r.status_code == 200 and "ok" in r.json(), (extra, r.status_code)
