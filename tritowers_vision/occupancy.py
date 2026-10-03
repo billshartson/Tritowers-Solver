@@ -10,7 +10,7 @@ def classify_patch(patch: Image.Image) -> tuple[SlotState, float]:
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     cream = float(np.mean((r > 190) & (g > 180) & (b > 150) & (r - b < 70)))
     red = float(np.mean((r > 140) & (g < 90) & (b < 100)))
-    if cream > .55: return SlotState.FACE_UP, min(1.0, cream)
+    if cream > .40 and red < .10: return SlotState.FACE_UP, min(1.0, cream)   # ornate indexes (Q, 8) lower the cream share
     if red > .25: return SlotState.COVERED, min(1.0, red * 2)
     if cream < .1 and red < .08: return SlotState.EMPTY, .6
     return SlotState.UNKNOWN, 0.3
