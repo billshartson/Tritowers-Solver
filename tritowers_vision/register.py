@@ -40,7 +40,7 @@ def evidence(rgb):
     v = a.max(axis=2); mn = a.min(axis=2); chroma = (v - mn) / (v + 1.0)
     red = (a[..., 0] - np.maximum(a[..., 1], a[..., 2])) / (a[..., 0] + 1.0)
     face = _ramp(v, 150, 185) * _ramp(chroma, 0.30, 0.17)
-    back = np.minimum(_ramp(red, 0.17, 0.32) * _ramp(v, 85, 125), 1.0 - face)
+    back = np.minimum(_ramp(red, 0.17, 0.32) * _ramp(v, 110, 140), 1.0 - face)      # parchment is darker (V ~100)
     hue = cv2.cvtColor(a.astype(np.uint8), cv2.COLOR_RGB2HSV)[..., 0].astype(np.float32)
     parch = _ramp(chroma, 0.28, 0.40) * _ramp(v, 35, 55) * _ramp(v, 215, 190) * ((hue >= 4) & (hue <= 32))
     return face.astype(np.float32), back.astype(np.float32), np.minimum(parch, 1.0 - face - back).astype(np.float32)

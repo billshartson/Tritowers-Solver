@@ -61,7 +61,7 @@ class Skin:
     def random(rng, font=None):
         j = lambda c, d: tuple(int(np.clip(v + rng.randint(-d, d), 0, 255)) for v in c)
         bg = rng.choice([(105, 80, 40), (95, 72, 38), (115, 88, 48)])            # parchment browns
-        return Skin(font=font, face=j((235, 225, 200), 8), back=j((170, 40, 60), 12), bg=j(bg, 10),
+        return Skin(font=font, face=j((235, 225, 200), 8), back=j((170, 40, 60), 12), bg=j(bg, 4),
                     red=j((200, 30, 40), 15), black=j((25, 25, 30), 10), glyph_px=rng.randint(21, 27))
 
 

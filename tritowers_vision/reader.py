@@ -66,7 +66,10 @@ def read_photo(source, templates=(), manual_corners=None):
     for s, c in cards.items():
         if c["state"] == "face_up" and c["rank"] is None: review.add(s)
         if s != "waste" and abs(c.get("presence", 1.0)) < PRESENCE_REVIEW: review.add(s)
-    if not reg.trusted: review.update(cards)
+    if not reg.trusted:                              # layout not found reliably: no rank is trustworthy either
+        review.update(cards)
+        for c in cards.values():
+            if c["rank"]: c["rank"] = None; c["tier"] = "untrusted_layout"
     order = list(cards)
     draft = {"cards": cards, "needs_human_review": [s for s in order if s in review], "complete": not review,
              "stock_counter": None, "note": NOTE,
