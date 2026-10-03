@@ -125,4 +125,50 @@ class T(unittest.TestCase):
     def test_does_not_mutate(self):
         b, w, s = next(deals(3, 1)); g = Game(b, w, True, s); snap = g.state_snapshot()
         solve_complete(g); self.assertEqual(g.state_snapshot(), snap)
+
+class Joker(unittest.TestCase):
+    # Joker rules are Bill-reported (relayed), model only; not machine-verified.
+    def deal(self, seed=7):
+        b, w, s = next(deals(seed, 1)); return b, w, s + ["*"]
+    def test_can_play_wild(self):
+        self.assertTrue(solver.can_play("7", "*")); self.assertFalse(solver.can_play("*", "7"))
+    def test_no_joker_unchanged(self):
+        for b, w, s in deals(9, 6):
+            self.assertEqual(solve_complete(Game(b, w, True, s)).moves, solve_complete(Game(b, w, True, s), require_full_deal=True).moves)
+    def test_joker_validation(self):
+        b, w, s = self.deal()
+        Game(b, w, True, s)
+        with self.assertRaises(ValueError): Game(b, w, True, ["*"] + s[:-1])           # not last
+        with self.assertRaises(ValueError): Game(b, w, True, s[:5] + ["*"] + s[5:])     # not last
+        with self.assertRaises(ValueError): Game(["*"] + b[1:], w, True, s)            # on board
+        with self.assertRaises(ValueError): Game(b, "*", True, s)                      # two jokers
+        with self.assertRaises(ValueError): Game(b, w, False, 23).board.__setitem__(0, "*") or Game(["*"] + b[1:], w, False, 23)
+    def test_solved_replays_with_joker_and_flags(self):
+        n = 0
+        for seed in range(1, 8):
+            b, w, s = self.deal(seed); g = Game(b, w, True, s)
+            r = solve_complete(g, require_full_deal=True, require_joker=True)
+            self.assertIn(r.status, ("solved", "unsolvable"))
+            if r.status == "solved": n += 1; self.assertTrue(verify(b, w, s, r.moves))
+        self.assertGreater(n, 3)
+    def test_joker_flags(self):
+        b, w, s = next(deals(7, 1))
+        self.assertEqual(solve_complete(Game(b, w, True, s), require_joker=True).reason, "joker_missing")
+        self.assertEqual(solve_complete(Game(b, w, True, s + ["*"]), require_full_deal=True).status in ("solved", "unsolvable"), True)
+        self.assertEqual(solve_complete(Game(b, w, True, s[:-1] + ["*"]), require_full_deal=True).reason, "not_full_deal")
+    def test_joker_draw_then_any_card_then_replacement(self):
+        # joker drawn: any exposed card can be played onto it, and the played card becomes the waste
+        b = ["K"] * 4 + ["Q"] * 4 + ["J"] * 4 + ["10"] * 4 + ["9"] * 4 + ["8"] * 4 + ["7"] * 4
+        g = Game(b, "2", True, ["*"]); g.draw_known(); self.assertEqual(g.waste, "*")
+        self.assertEqual(len(g.legal_moves()), len(g.exposed()))
+        p = g.legal_moves()[0]; g.play(p); self.assertEqual(g.waste, g.board[p - 1])
+    def test_joker_is_last_so_stock_empty_continues_play(self):
+        # after the joker is drawn the stock is empty but legal board moves must still count
+        b, w, s = self.deal(2); g = Game(b, w, True, s)
+        while g.stock: g.draw_known()
+        self.assertEqual(g.waste, "*"); self.assertEqual(g.stock, [])
+        r = solve_complete(g); self.assertNotEqual(r.status, "incomplete")
+    def test_mutated_second_joker_is_incomplete(self):
+        b, w, s = self.deal(); g = Game(b, w, True, s); g.waste = "*"
+        self.assertEqual(solve_complete(g).status, "incomplete")
 if __name__ == "__main__": unittest.main()
