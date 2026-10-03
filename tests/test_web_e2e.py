@@ -107,3 +107,23 @@ def test_complete_deal_mode_never_guesses(server, browser, vp):
     page.click("#solEdit"); page.click("#soAdd"); page.click('#keys button[data-k="7"]')
     assert page.locator("#soChips .chip").count() == 1 and not errs
     page.close()
+
+
+@pytest.mark.parametrize("vp", ["desktop", "phone"])
+def test_impossible_deck_is_flagged_before_start(server, browser, vp):
+    """Seven 8s and five Qs must be caught on the setup screen, with a clear message, and Start must not run."""
+    ctx = browser.new_context(viewport=VIEWPORTS[vp]); page = ctx.new_page()
+    posts = []; page.on("request", lambda r: posts.append(r.url) if r.method == "POST" and "/api/new" in r.url else None)
+    page.goto(server); page.wait_for_selector("#editBoard .c")
+    page.click("summary:has-text('Paste the board')")
+    page.fill("#paste", "2 7 10 Q Q Q 8 9 9 2 K J 8 Q 3 Q 8 8 6 5 8 A 7 8 8 5 7 7")
+    page.click("#pasteBtn")
+    page.click("#wasteBtn"); page.click('#keys button[data-k="A"]')
+    warn = page.locator("#deckWarn"); warn.wait_for(state="visible")
+    assert "8 x7" in warn.inner_text() and "Q x5" in warn.inner_text()
+    page.click("#startBtn")
+    assert "Impossible deck" in page.locator("#msg").inner_text()
+    page.wait_for_timeout(300); assert posts == [] and page.locator("#board .c").count() == 0
+    page.fill("#paste", " ".join(["?"] * 28)); page.click("#pasteBtn")
+    page.wait_for_selector("#deckWarn", state="hidden")
+    ctx.close()
