@@ -60,8 +60,9 @@ def ink_mask(patch):
 def raw_glyph(patch, scale=1.0):
     """Binary rank glyph (variable size) or None. scale: index size relative to a tableau card.
 
-    The rank occupies a band GLYPH_H tall from its top; every blob starting inside the band belongs to it (blur and
-    moire can split a stroke), and the band's bottom edge cuts off a suit pip that has merged into the glyph."""
+    The rank occupies a band from its top down to the first clear gap (the space above the suit pip; smaller indexes
+    on other skins put the pip well inside a fixed band), at most GLYPH_H; every blob starting inside the band belongs
+    to it (blur and moire can split a stroke), and the band's bottom edge cuts off a pip that has merged into it."""
     ink = ink_mask(patch)
     n, lab, st, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     H, W = ink.shape
@@ -78,7 +79,12 @@ def raw_glyph(patch, scale=1.0):
     top = min(tops); bottom = top + int(GLYPH_H * unit)
     first = min((i for i in cands if st[i, cv2.CC_STAT_TOP] == top), key=lambda i: st[i, cv2.CC_STAT_LEFT])
     left = st[first, cv2.CC_STAT_LEFT]
-    keep = [i for i in cands if top <= st[i, cv2.CC_STAT_TOP] < bottom - 4 * unit and st[i, cv2.CC_STAT_LEFT] < left + 30 * unit]
+    column = [i for i in cands if top <= st[i, cv2.CC_STAT_TOP] < bottom and st[i, cv2.CC_STAT_LEFT] < left + 30 * unit]
+    rows = np.isin(lab, column)[top:bottom].any(axis=1)
+    gap = max(2, int(round(2 * unit)))
+    for y in range(int(0.45 * GLYPH_H * unit), len(rows) - gap):     # first empty run past a plausible glyph height
+        if not rows[y:y + gap].any(): bottom = top + y; break
+    keep = [i for i in column if st[i, cv2.CC_STAT_TOP] < bottom - min(4 * unit, 0.2 * (bottom - top))]
     m = np.isin(lab, keep)[top:bottom].astype(np.float32); ys, xs = np.nonzero(m)
     if not len(xs): return None
     return m[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
