@@ -253,11 +253,20 @@ def normalize(card):
     return card
 
 
+JOKER = "*"
+
+
 def can_play(card, waste):
     """
     Determine whether 'card' can be played on 'waste'.
     """
 
+    # The joker ("*") only ever sits on the waste: it accepts any ranked card, and a ranked
+    # card played onto it becomes the new waste. It is never a tableau card.
+    if waste == JOKER:
+        return card in VALUE
+    if card == JOKER:
+        return False
     card_value = VALUE[card]
     waste_value = VALUE[waste]
 
@@ -290,25 +299,38 @@ def validate_deal(board, waste, stock_known, stock):
     represented by a nonnegative count; known stock remains ordered.
     """
     board = validate_board(board)
-    waste = normalize(waste)
-    if waste not in RANKS:
+    waste = JOKER if isinstance(waste, str) and waste.strip() == JOKER else normalize(waste)
+    if waste not in RANKS and waste != JOKER:
         raise ValueError("Waste must have a known rank.")
 
+    jokers = 1 if waste == JOKER else 0
     if stock_known:
         if not isinstance(stock, (list, tuple)):
             raise ValueError("Known stock must be an ordered sequence.")
-        normalized_stock = [normalize(card) for card in stock]
-        if any(card not in RANKS for card in normalized_stock):
-            raise ValueError("Known stock cannot contain unknown or removed cards.")
+        normalized_stock = [
+            JOKER if isinstance(card, str) and card.strip() == JOKER else normalize(card)
+            for card in stock
+        ]
+        for index, card in enumerate(normalized_stock):
+            if card == JOKER:
+                # Provenance: Bill-reported rule (always the last card of the stock). Model only.
+                if index != len(normalized_stock) - 1:
+                    raise ValueError("The joker can only be the last stock card.")
+                jokers += 1
+            elif card not in RANKS:
+                raise ValueError("Known stock cannot contain unknown or removed cards.")
+        if jokers > 1:
+            raise ValueError("Only one joker exists.")
         stock = normalized_stock
     else:
         if isinstance(stock, bool) or not isinstance(stock, int) or stock < 0:
             raise ValueError("Unknown stock must be a nonnegative card count.")
 
     counts = Counter(card for card in board if card in RANKS)
-    counts[waste] += 1
+    if waste in RANKS:
+        counts[waste] += 1
     if stock_known:
-        counts.update(stock)
+        counts.update(card for card in stock if card in RANKS)
     overfull = {rank: count for rank, count in counts.items() if count > COPIES_PER_RANK}
     if overfull:
         details = ", ".join(f"{rank}={count}" for rank, count in sorted(overfull.items()))
@@ -356,9 +378,10 @@ class Game:
         self.seen_counts = Counter(
             card for card in self.board if card in RANKS
         )
-        self.seen_counts[self.waste] += 1
+        if self.waste in RANKS:
+            self.seen_counts[self.waste] += 1
         if self.stock_known:
-            self.seen_counts.update(self.stock)
+            self.seen_counts.update(c for c in self.stock if c in RANKS)
         self._validate_seen_counts()
 
     @property
@@ -1531,14 +1554,20 @@ class _Budget(Exception):
 
 
 def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_000,
-                   draw_only_when_stuck=True, require_full_deal=False):
+                   draw_only_when_stuck=True, require_full_deal=False, require_joker=False):
     """Exact search over a fully known deal: every tableau card, the waste and the ordered stock.
 
     Does not mutate ``game``. Rules come from can_play, ACE_WRAP and BLOCKERS above.
 
     Input is a known POSITION, possibly mid-game (some tableau cards removed, a short stock); only the
     4-per-rank and 52-card ceilings are checked. Pass require_full_deal=True for a fresh deal
-    (28 tableau + waste + 23 stock = 52, nothing removed), otherwise status "incomplete".
+    (28 tableau + waste + 23 stock = 52, nothing removed; or 24 stock ending in the joker "*"),
+    otherwise status "incomplete".
+
+    Joker ("*", Bill-reported rules, not verified against the machine): one extra card, always the
+    last stock card, never on the tableau; any ranked card can be played onto it and that card then
+    becomes the waste. require_joker=True demands the full 53-card fresh deal (stock of 24 ending
+    in "*"). No joker in the stock means exactly the previous 52-card behaviour.
     draw_only_when_stuck=True matches the CLI (a draw only when no tableau card is playable);
     False also allows a voluntary draw. Which one the real machine uses is unverified, and
     "unsolvable" holds only for the chosen setting.
@@ -1568,8 +1597,12 @@ def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_0
             raise ValueError("board has cleared slots not in removed")
         if any(not BLOCKER_SETS[p] <= removed for p in removed):
             raise ValueError("removed card is still covered")
-        if require_full_deal and (removed or len(game.stock) != 23):
+        has_joker = bool(game.stock) and game.stock[-1] == JOKER
+        if require_full_deal and (removed or game.waste == JOKER
+                                  or len(game.stock) != (24 if has_joker else 23)):
             return done("incomplete", reason="not_full_deal")
+        if require_joker and not (has_joker and not removed and game.waste != JOKER):
+            return done("incomplete", reason="joker_missing")
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         return done("incomplete", reason=f"invalid_deal: {exc}")
     board, stock = list(game.board), list(game.stock)  # validated above
