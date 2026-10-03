@@ -44,7 +44,7 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
   <div class="tw"><div class="towers" id="editBoard"></div></div>
   <p class="sub">The 10 cards on the bottom row are face-up. Enter them here, or just press Start and I will ask for each one.</p>
   <div class="setrow"><div><div class="lbl">Waste card (required)</div><button class="wslot" id="wasteBtn" type="button">?</button></div>
-   <div><div class="lbl">Stock cards left</div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">23</output><button class="b" id="stP" type="button" aria-label="more">+</button></div></div></div>
+   <div><div class="lbl">Stock cards left <small>(machine counter minus 1: the last card is the joker)</small></div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">23</output><button class="b" id="stP" type="button" aria-label="more">+</button></div></div></div>
   <div id="stockOrder" hidden><div class="lbl">Stock order, next card drawn first (<span id="soN">0</span> entered; must match the stock count above)</div><div class="chips" id="soChips"></div><div class="row"><button class="b" id="soAdd" type="button">Add cards</button><button class="b" id="soClear" type="button">Clear stock</button></div></div>
   <details><summary>Paste the board as text</summary><p class="sub">28 entries, positions 1-28. A 2-10 J Q K, ? = face-down, -- = empty.</p><textarea id="paste" rows="3"></textarea><button class="b" id="pasteBtn" type="button" style="margin-top:6px">Use this text</button></details>
  </div>

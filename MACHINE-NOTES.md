@@ -8,4 +8,4 @@ Source: seven photos of a real Tri Towers machine, supplied by Bill Hart (privat
 - The stock counter on the board reads 24 at the start. That is the deck row minus the waste card: 23 real cards plus the joker. So enter (counter - 1) as "stock cards left" in the solver.
 - On all three pairs, the 10 base-row cards on the board equal draw positions 19-28 in the same left-to-right order, and the waste equals the last deck-row card.
 - Draw direction from the waste to the joker (right to left in the deck row) is inferred from the layout, not observed. All four deals are solvable under it.
-- UNVERIFIED: how the joker plays (dead or wild) when it is finally drawn. The solver ignores it. That matches the machine only if the joker is a dead card.
+- Joker rules (Bill, 3 Oct 2026): it is always the last card in the stock, it plays onto any waste card, and any card plays onto it. A card played onto the joker becomes the waste as normal. The game is lost only when the stock is empty and no board card can play. The solver core models this (PR #38). The web app and photo reader do not handle the joker yet.
