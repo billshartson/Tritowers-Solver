@@ -103,7 +103,11 @@ def _precompute(entry):
                 tmp = ui.Session(game)
                 text, pos, proven, rate, sims = ui.recommend_detail(tmp, 1200, None)
                 if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {game.board[pos - 1]} marked with the blue star.")
-                pre["res"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims}
+                fs = None
+                try:
+                    if pos: fs = ui.foresight_line(tmp, pos)
+                except Exception: fs = None
+                pre["res"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims, "foresight": fs}
         except Exception: pre["res"] = None
         finally: pre["done"].set()
     threading.Thread(target=work, daemon=True).start()
@@ -132,7 +136,11 @@ def _do(entry, op, body):
             if entry.get("advice"): return ""
         text, pos, proven, rate, sims = ui.recommend_detail(s, body.get("sims", 1200), body.get("seed"))
         if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {s.game.board[pos - 1]} marked with the blue star.")
-        entry["advice"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims}
+        fs = None
+        try:
+            if pos: fs = ui.foresight_line(s, pos)
+        except Exception: fs = None
+        entry["advice"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims, "foresight": fs}
     else: raise ValueError("Unknown action.")
     if op in ("play", "reveal", "draw", "undo"): _precompute(entry)
     if op == "state": _adopt(entry)
@@ -179,19 +187,26 @@ def _replay_frames(game, moves):
 def api_solve(body: dict):
     """Complete-deal mode: every card known, stock order known. Never guesses missing cards."""
     board = str(body.get("board", "")).replace(",", " ").split(); waste = str(body.get("waste", "")).strip()
-    stock = [str(x).strip() for x in (body.get("stock") or [])]
+    raw_stock = body.get("stock")
+    if raw_stock is None: raw_stock = []
+    if not isinstance(raw_stock, (list, tuple)): return {"ok": False, "message": "Stock must be a list of cards in draw order."}
+    stock = [str(x).strip() for x in raw_stock]
+    try:
+        stock_count = None if body.get("stock_count") is None else ui.to_int(body.get("stock_count"), "Stock count", 0, 23)
+        budget_in = float(body.get("time_budget", 20))
+    except Exception as e: return {"ok": False, "message": str(e) if "Stock count" in str(e) else "Time budget must be a number."}
     missing = []
     if len(board) != 28: return {"ok": False, "message": f"Need 28 board entries, got {len(board)}."}
     missing += [f"tableau position {i}" for i, c in enumerate(board, 1) if c == "?"]
     if not waste: missing.append("waste card")
-    if body.get("stock_count") is not None and int(body["stock_count"]) != len(stock): missing.append(f"stock order ({len(stock)} of {int(body['stock_count'])} cards entered)")
+    if stock_count is not None and stock_count != len(stock): missing.append(f"stock order ({len(stock)} of {stock_count} cards entered)")
     if missing:
         return {"ok": True, "status": "incomplete", "message": "The deal is not complete, so I will not guess. Missing: " + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "") + ".", "missing": missing}
     try: game = solver.Game(board, waste, True, stock)
     except Exception as e: return {"ok": False, "message": str(e)}
     fn = getattr(solver, "solve_complete", None)
     if fn is None: return {"ok": True, "status": "unavailable", "message": "The exact solver is not installed in this build yet."}
-    budget = min(float(body.get("time_budget", 20)), 25)
+    budget = max(0.5, min(budget_in, 25))
     def run(stuck, share):
         return fn(game.copy(), time_budget=budget * share, require_full_deal=True, draw_only_when_stuck=stuck)
     try:
