@@ -24,7 +24,7 @@ WASTE_CORNER = (-6, -6, 62, 78)          # the waste index is larger
 BANK = Path(__file__).with_name("data") / "font_glyphs.npz"
 # Acceptance gates: (best score, margin over the best other rank) for each tier.
 PHOTO_SCORE, PHOTO_MARGIN = 0.85, rank2.PHOTO_MARGIN   # 0.85: no wrong accepts when a rank has no template (leave-one-out)
-FONT_SCORE, FONT_MARGIN = 0.70, 0.10    # no wrong accepts on 465 real and re-shot pilot glyphs (coverage ~87%)
+FONT_SCORE, FONT_MARGIN = 0.75, 0.10    # no wrong accepts on 465 real and re-shot pilot glyphs, nor on held-out synthetic fonts
 FONT_FIT = 0.75                          # below this image-level fit the font tier names nothing (see font_fit)
 _BANK = None
 
