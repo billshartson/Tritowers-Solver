@@ -16,7 +16,7 @@ main{max-width:720px;margin:0 auto}h1{font-size:22px;margin:4px 0 2px}.sub{color
 .row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1 1 140px}
 button.b{font:600 17px system-ui;padding:14px 12px;border-radius:12px;border:0;background:#e6e3da;color:var(--ink);min-height:50px;cursor:pointer}
 button.b.pri{background:var(--pri);color:#fff}button.b:disabled{opacity:.45;cursor:not-allowed}
-#msg{min-height:24px;font-size:16px;margin:6px 2px}#msg.err{color:#b00020;font-weight:600}#msg.net{color:#8a5a00}
+#msg{min-height:24px;font-size:16px;margin:6px 2px}#msg.err{color:#b00020;font-weight:600}#msg.net{color:#8a5a00}#deckWarn{color:#b00020;font-weight:600;font-size:16px;margin:8px 2px}#deckWarn[hidden]{display:none}
 #status{font-weight:600;text-align:center;font-size:17px;margin:6px 0}
 .adv{white-space:pre-line;border-left:6px solid var(--blue);background:#eef4ff;border-radius:8px;padding:10px 12px;font-size:16px;line-height:1.35}
 .stepper{display:flex;align-items:center;gap:10px}.stepper button{width:48px;height:48px;font-size:24px}.stepper output{font-size:24px;font-weight:700;min-width:44px;text-align:center}
@@ -47,6 +47,7 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
   <div id="stockOrder" hidden><div class="lbl">Stock order, next card drawn first (<span id="soN">0</span> entered; must match the stock count above)</div><div class="chips" id="soChips"></div><div class="row"><button class="b" id="soAdd" type="button">Add cards</button><button class="b" id="soClear" type="button">Clear stock</button></div></div>
   <details><summary>Paste the board as text</summary><p class="sub">28 entries, positions 1-28. A 2-10 J Q K, ? = face-down, -- = empty.</p><textarea id="paste" rows="3"></textarea><button class="b" id="pasteBtn" type="button" style="margin-top:6px">Use this text</button></details>
  </div>
+ <div id="deckWarn" role="alert" hidden></div>
  <button class="b pri" id="startBtn" type="button" style="width:100%">Start game</button>
  <button class="b pri" id="solveBtn" type="button" style="width:100%" hidden>Solve this deal</button>
 </section>
@@ -85,7 +86,7 @@ async function post(url,body,{timeout=75000,form=false}={}){
     try{
       const r=await fetch(url,{method:"POST",headers:form?{}:{"Content-Type":"application/json"},body:form?body:JSON.stringify({...body,req_id:id}),signal:ac.signal});
       clearTimeout(t);
-      if(r.status>=500||r.status===429){last=new Error("server "+r.status)}else{return await r.json()}
+      if(r.status>=500||r.status===429){last=new Error("server "+r.status)}else{const j=await r.json();if($("msg").className==="net")msg("");return j}
     }catch(e){clearTimeout(t);last=e}
     msg("Connection hiccup, retrying…","net");await new Promise(r=>setTimeout(r,Math.min(1000*(i+1),4000)));
   }
@@ -101,7 +102,10 @@ function boardHTML(cells,mode){
     return `<button type="button" class="c ${cls}" data-p="${c.p}" aria-label="${label}" style="left:${c.x}%;top:${c.y}%">${txt}</button>`}).join("");
 }
 function sized(el){el.parentElement.style.aspectRatio=aspect;el.style.aspectRatio=aspect}
-function drawEdit(){const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("stV").textContent=setup.stock}
+function deckProblems(){const n={};const add=c=>{if(RANKS.includes(c))n[c]=(n[c]||0)+1};setup.board.forEach(add);add(setup.waste);if(setup.deal)setup.order.forEach(add);
+  const bad=RANKS.filter(r=>n[r]>4).map(r=>r+" x"+n[r]);return bad.length?"Impossible deck: a deck has only four of each rank, but this board has "+bad.join(", ")+". Fix the board before starting.":""}
+function showDeck(){const w=$("deckWarn");if(!w)return "";const t=deckProblems();w.textContent=t;w.hidden=!t;return t}
+function drawEdit(){const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("stV").textContent=setup.stock;showDeck()}
 function draw(){
   $("setup").hidden=true;$("play").hidden=false;
   $("board").innerHTML=boardHTML(S.cells,"play");sized($("board"));
@@ -156,7 +160,7 @@ $("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Read
     if(!r.ok){msg(r.message,"err");return}
     setup.board=r.board;if(r.waste)setup.waste=r.waste;drawEdit();$("photoNote").textContent=r.note;msg("Photo read. Check the cards below, then set the stock and Start.")}
   catch(e){msg("Could not upload the photo. Try again.","err")}$("photo").value=""};
-$("startBtn").onclick=async()=>{if(busy)return;if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
+$("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
   busy=true;msg("");
   try{const r=await post("/api/new",{board:setup.board.join(" "),waste:setup.waste,stock:setup.stock});busy=false;
     if(!r.ok){msg(r.message,"err");return}
@@ -173,7 +177,7 @@ function setMode(deal){setup.deal=deal;$("modePlay").classList.toggle("on",!deal
   $("startBtn").hidden=deal;$("solveBtn").hidden=!deal;$("stockOrder").hidden=!deal;
   $("modeHelp").textContent=deal?"Every card must be known: the 28 table cards, the waste and the whole stock in order. I will not guess missing cards.":"Cards covered on the table stay hidden; I will ask for each one as it is uncovered.";
   drawStock()}
-function drawStock(){$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip" data-i="${i}" aria-label="Stock card ${i+1}">${c}</button>`).join("")}
+function drawStock(){showDeck();$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip" data-i="${i}" aria-label="Stock card ${i+1}">${c}</button>`).join("")}
 $("modePlay").onclick=()=>setMode(false);$("modeDeal").onclick=()=>setMode(true);
 $("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1),["remove"],k=>{if(k==="remove")setup.order.splice(i,1);else setup.order[i]=k;drawStock()})};
 $("soClear").onclick=()=>{setup.order=[];drawStock()};
@@ -186,7 +190,7 @@ function showStep(){const f=SOL.frames[step];$("solN").textContent=step;$("solT"
   $("solPrev").disabled=step===0;$("solNext").disabled=step>=SOL.steps.length;$("solNext").textContent=step>=SOL.steps.length-1?(step>=SOL.steps.length?"Done":"Last step"):"Next step"}
 $("solPrev").onclick=()=>{if(step>0){step--;showStep()}};$("solNext").onclick=()=>{if(step<SOL.steps.length){step++;showStep()}};
 $("solEdit").onclick=()=>{$("solved").hidden=true;$("setup").hidden=false;msg("")};
-$("solveBtn").onclick=async()=>{if(busy)return;busy=true;msg("Solving… this can take up to 25 seconds.");$("solveBtn").disabled=true;
+$("solveBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}busy=true;msg("Solving… this can take up to 25 seconds.");$("solveBtn").disabled=true;
   try{const r=await post("/api/solve",{board:setup.board.join(" "),waste:setup.waste,stock:setup.order,stock_count:setup.stock},{timeout:60000});
     $("setup").hidden=true;$("solved").hidden=false;$("solBanner").textContent=r.message||"";$("solBody").hidden=true;msg("");
     if(r.ok&&r.status==="solved"){SOL=r;step=0;$("solBody").hidden=false;$("solBanner").className="adv";showStep()}else{$("solBanner").className="warn"}}
