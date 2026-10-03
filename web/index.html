@@ -18,7 +18,7 @@ button.b{font:600 17px system-ui;padding:14px 12px;border-radius:12px;border:0;b
 button.b.pri{background:var(--pri);color:#fff}button.b:disabled{opacity:.45;cursor:not-allowed}
 #msg{min-height:24px;font-size:16px;margin:6px 2px}#msg.err{color:#b00020;font-weight:600}#msg.net{color:#8a5a00}
 #status{font-weight:600;text-align:center;font-size:17px;margin:6px 0}
-.adv{border-left:6px solid var(--blue);background:#eef4ff;border-radius:8px;padding:10px 12px;font-size:16px;line-height:1.35}
+.adv{white-space:pre-line;border-left:6px solid var(--blue);background:#eef4ff;border-radius:8px;padding:10px 12px;font-size:16px;line-height:1.35}
 .stepper{display:flex;align-items:center;gap:10px}.stepper button{width:48px;height:48px;font-size:24px}.stepper output{font-size:24px;font-weight:700;min-width:44px;text-align:center}
 .wslot{width:64px;height:84px;border-radius:9px;border:2px solid #8a8a8a;background:var(--card);font:700 30px system-ui;cursor:pointer}
 .setrow{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:8px 0}.lbl{font-size:13px;color:var(--mut);margin-bottom:4px}
@@ -107,7 +107,7 @@ function draw(){
   $("board").innerHTML=boardHTML(S.cells,"play");sized($("board"));
   $("wst").textContent=S.waste;$("rem").textContent=S.remaining;$("stk").textContent=S.stock;
   $("status").textContent=S.over?"Tableau cleared. You won!":(S.pending.length?"Tap each yellow ? and pick the card it is.":S.status);
-  const a=S.advice;$("adv").hidden=!a;if(a)$("adv").textContent=a.text;
+  const a=S.advice;$("adv").hidden=!a;if(a)$("adv").textContent=a.text+(a.foresight?"\n"+a.foresight:"");
   $("recBtn").disabled=busy||S.over||S.pending.length>0;$("drawBtn").disabled=busy||!S.can_draw;$("undoBtn").disabled=busy||!S.can_undo;
   $("log").textContent=(S.log||[]).join("\n");
 }
