@@ -79,18 +79,22 @@ const $=id=>document.getElementById(id);
 let sid=sessionStorage.getItem("tt_sid"),busy=false,geo=null,aspect=1.9,S=null,setup={board:Array(28).fill("?"),waste:"",stock:23,order:[],deal:false},SOL=null,step=0;
 function msg(t,cls){const m=$("msg");m.textContent=t||"";m.className=cls||""}
 function rid(){return (crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now())}
+const RETRY_MS=100000;   // keep retrying a failed request this long (the host's tunnel watchdog bounds outages at ~50 s)
 async function post(url,body,{timeout=75000,form=false}={}){
-  const id=rid();let last;
-  for(let i=0;i<10;i++){
+  const id=rid();let last,firstFail=0;
+  for(let i=0;;i++){
     const ac=new AbortController(),t=setTimeout(()=>ac.abort(),timeout);
     try{
       const r=await fetch(url,{method:"POST",headers:form?{}:{"Content-Type":"application/json"},body:form?body:JSON.stringify({...body,req_id:id}),signal:ac.signal});
       clearTimeout(t);
       if(r.status>=500||r.status===429){last=new Error("server "+r.status)}else{const j=await r.json();if($("msg").className==="net")msg("");return j}
     }catch(e){clearTimeout(t);last=e}
-    msg("Connection hiccup, retrying…","net");await new Promise(r=>setTimeout(r,Math.min(1000*(i+1),4000)));
+    if(!firstFail)firstFail=Date.now();
+    const waited=Date.now()-firstFail;
+    if(waited>=RETRY_MS)throw last;
+    msg("Connection hiccup - still trying ("+Math.round(waited/1000)+" s). Your board is kept; no need to press again.","net");
+    await new Promise(r=>setTimeout(r,Math.min(1000*(i+1),4000)));
   }
-  throw last;
 }
 function boardHTML(cells,mode){
   return cells.map(c=>{
@@ -161,11 +165,11 @@ $("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Read
     setup.board=r.board;if(r.waste)setup.waste=r.waste;drawEdit();$("photoNote").textContent=r.note;msg("Photo read. Check the cards below, then set the stock and Start.")}
   catch(e){msg("Could not upload the photo. Try again.","err")}$("photo").value=""};
 $("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
-  busy=true;msg("");
+  busy=true;msg("");$("startBtn").textContent="Starting…";
   try{const r=await post("/api/new",{board:setup.board.join(" "),waste:setup.waste,stock:setup.stock});busy=false;
     if(!r.ok){msg(r.message,"err");return}
     sid=r.sid;sessionStorage.setItem("tt_sid",sid);S=r;draw();msg(r.pending&&r.pending.length?"Tap each yellow ? and pick the card.":"")}
-  catch(e){busy=false;msg("Could not reach the server. Try again.","err")}};
+  catch(e){busy=false;msg("Could not reach the server after about 100 s. Your board is kept - press Start again.","err")}finally{$("startBtn").textContent="Start game"}};
 (async()=>{
   const g=await (await fetch("/api/geo")).json();geo=g.geo;aspect=g.aspect;drawEdit();
   if(sid){try{const r=await post("/api/act",{sid,op:"state"});if(r.gone){sessionStorage.removeItem("tt_sid");sid=null}else{S=r;draw()}}catch(e){}}

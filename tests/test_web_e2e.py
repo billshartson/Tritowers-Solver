@@ -127,3 +127,22 @@ def test_impossible_deck_is_flagged_before_start(server, browser, vp):
     page.fill("#paste", " ".join(["?"] * 28)); page.click("#pasteBtn")
     page.wait_for_selector("#deckWarn", state="hidden")
     ctx.close()
+
+
+def test_start_survives_a_40_second_outage(server, browser):
+    """Start must keep retrying through a ~40 s full outage (530s) and then work, with honest progress text."""
+    ctx = browser.new_context(viewport=VIEWPORTS["phone"]); page = ctx.new_page()
+    t0 = time.time(); seen = []
+    def handler(route):
+        if time.time() - t0 < 40:
+            seen.append(1); route.fulfill(status=530, body="error code: 1033")
+        else: route.continue_()
+    page.goto(server); page.wait_for_selector("#editBoard .c")
+    page.click("#wasteBtn"); page.click('#keys button[data-k="K"]')
+    t0 = time.time(); page.route("**/api/new", handler)
+    page.click("#startBtn")
+    page.wait_for_function("document.querySelector('#msg').textContent.includes('still trying')", timeout=15000)
+    assert page.locator("#startBtn").inner_text().startswith("Starting")
+    page.wait_for_selector("#board .c", timeout=90000)
+    assert len(seen) >= 5 and "Could not reach" not in page.locator("#msg").inner_text()
+    ctx.close()
