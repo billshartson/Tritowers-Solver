@@ -38,10 +38,13 @@ def parse_board(text):
     if len(tokens) != 28: raise ValueError(f"Need 28 board entries (positions 1-28), got {len(tokens)}. Use ? for a covered card and -- for an empty slot.")
     return tokens
 
-def new_session(board_text, waste, stock):
+def new_session(board_text, waste, stock, joker=False):
+    """Create a play-along session; stock includes the fixed last joker when opted in."""
+    if not isinstance(joker, bool):
+        raise ValueError("Joker mode must be true or false.")
     board = parse_board(board_text)
-    stock = to_int(stock, "Stock", 0, MAX_STOCK)
-    return Session(solver.Game(board, waste, False, stock))
+    stock = to_int(stock, "Stock", 0, MAX_STOCK + int(joker))
+    return Session(solver.Game(board, waste, False, stock, joker_in_stock=joker))
 
 def pending_reveals(game):
     return [p for p in game.exposed() if game.board[p - 1] == "?"]
@@ -84,7 +87,11 @@ def _completion(game, pool, hidden, rng):
     cards = pool[:]; rng.shuffle(cards)
     g = game.copy(); k = 0
     for i in hidden: g.board[i] = cards[k]; k += 1
-    if not g.stock_known: g.stock = cards[k:]; g.stock_known = True
+    if not g.stock_known:
+        # The joker is a fixed stock tail, never a shuffled tableau/rank-pool card.
+        g.stock = cards[k:] + ([solver.JOKER] if g.joker_in_stock else [])
+        g.stock_known = True
+        g.joker_in_stock = False
     return g
 
 def estimate_moves(game, moves, samples=ESTIMATE_SAMPLES, budget=ESTIMATE_BUDGET, rng=None):
@@ -98,7 +105,7 @@ def estimate_moves(game, moves, samples=ESTIMATE_SAMPLES, budget=ESTIMATE_BUDGET
     rng = rng or random.Random()
     hidden = [i for i, c in enumerate(game.board) if c == "?" and (i + 1) not in game.removed]
     pool = game.unknown_card_pool()
-    stock_n = 0 if game.stock_known else game.stock_remaining
+    stock_n = 0 if game.stock_known else game.stock_remaining - int(game.joker_in_stock)
     if len(pool) != len(hidden) + stock_n: return None
     stats = {p: {"won": 0, "lost": 0, "unknown": 0, "n": 0} for p in moves}
     deadline = time.monotonic() + budget; done = 0
