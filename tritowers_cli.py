@@ -22,6 +22,7 @@ def build_parser():
         help="cap total sampling time per recommendation, in seconds",
     )
     parser.add_argument("--skip-tutorial", action="store_true", help="skip the startup tutorial")
+    parser.add_argument("--joker", action="store_true", help="the machine has a joker as the last stock card (stock counter includes it, so a fresh stock is 24)")
     return parser
 
 

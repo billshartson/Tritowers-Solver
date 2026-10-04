@@ -355,15 +355,29 @@ class Game:
         board,
         waste,
         stock_known,
-        stock
+        stock,
+        joker_in_stock=False
     ):
 
-        board, waste, stock_known, stock = validate_deal(
-            board, waste, stock_known, stock
+        # joker_in_stock: opt-in, unknown-order stock only. The stock count then
+        # INCLUDES the joker, which is always the last stock card (Bill-reported
+        # rule, model only). It never enters the ranked pool or seen_counts.
+        joker_in_stock = bool(joker_in_stock)
+        if joker_in_stock:
+            if stock_known:
+                raise ValueError("joker_in_stock is for an unknown-order stock; put '*' last in a known stock instead.")
+            if isinstance(stock, bool) or not isinstance(stock, int) or stock < 1:
+                raise ValueError("A stock holding the joker needs a count of at least 1.")
+        board, waste, stock_known, checked_stock = validate_deal(
+            board, waste, stock_known, stock - 1 if joker_in_stock else stock
         )
+        if waste == JOKER and joker_in_stock:
+            raise ValueError("Only one joker exists.")
+        stock = checked_stock + 1 if joker_in_stock else checked_stock
         self.board = board
         self.waste = waste
         self.stock_known = stock_known
+        self.joker_in_stock = joker_in_stock
         self.stock = list(stock) if stock_known else stock
 
         # Positions are 1-28.
@@ -403,6 +417,7 @@ class Game:
             "stock_known": self.stock_known,
             "stock": tuple(self.stock) if self.stock_known else self.stock,
             "stock_remaining": self.stock_remaining,
+            "joker_in_stock": self.joker_in_stock,
             "remaining": self.remaining(),
         }
 
@@ -418,6 +433,7 @@ class Game:
         new_game.board = self.board.copy()
         new_game.waste = self.waste
         new_game.stock_known = self.stock_known
+        new_game.joker_in_stock = self.joker_in_stock
         new_game.stock = self.stock.copy() if self.stock_known else self.stock
         new_game.removed = self.removed.copy()
         new_game.seen_counts = self.seen_counts.copy()
@@ -470,6 +486,18 @@ class Game:
             raise ValueError("Cannot manually observe a known stock.")
         if self.stock_empty:
             raise ValueError("The stock is empty.")
+        if self.joker_in_stock:
+            if self.stock == 1:
+                if not (isinstance(card, str) and card.strip() in (JOKER, "joker", "Joker")):
+                    raise ValueError("The last stock card is the joker.")
+                self.stock = 0
+                self.joker_in_stock = False
+                self.waste = JOKER
+                return JOKER
+            if isinstance(card, str) and card.strip() == JOKER:
+                raise ValueError("The joker is only ever the last stock card.")
+        elif isinstance(card, str) and card.strip() == JOKER:
+            raise ValueError("This game has no joker in the stock.")
         card = self.observe_rank(card)
         self.stock -= 1
         self.waste = card
@@ -744,7 +772,7 @@ def overfull_report(board, waste, stock_known, stock):
     ]
 
 
-def repair_entry(board, waste, stock_known, stock, read_line=input, emit=print):
+def repair_entry(board, waste, stock_known, stock, read_line=input, emit=print, joker=False):
     """Build the Game, letting the user correct entry mistakes in place.
 
     Instead of failing and restarting 50-odd ranks, show where the problem
@@ -757,7 +785,7 @@ def repair_entry(board, waste, stock_known, stock, read_line=input, emit=print):
 
         if not problems:
             try:
-                return Game(board, waste, stock_known, stock)
+                return Game(board, waste, stock_known, stock, joker_in_stock=joker and not stock_known)
             except ValueError as error:
                 problems = [str(error)]
 
@@ -817,7 +845,7 @@ def review_setup(game, read_line=input, emit=print):
             board, waste, stock = apply_correction(
                 line, game.board, game.waste, game.stock, game.stock_known
             )
-            game = Game(board, waste, game.stock_known, stock)
+            game = Game(board, waste, game.stock_known, stock, joker_in_stock=game.joker_in_stock)
 
         except ValueError as error:
             emit(f"Not changed: {error}")
@@ -985,23 +1013,26 @@ BOTTOM ROW:
 # SETUP
 # ======================================================================
 
-def read_stock_count(read_line=None, emit=print):
-    """Ask how many stock cards remain when entering a game in progress."""
+def read_stock_count(read_line=None, emit=print, joker=False):
+    """Ask how many stock cards remain when entering a game in progress.
+
+    With the joker the machine counter includes it (fresh stock is 24)."""
     read_line = read_line or input
+    top = TOTAL_STOCK + (1 if joker else 0)
     while True:
         raw = read_line(
-            f"Stock cards remaining (0-{TOTAL_STOCK}): "
+            f"Stock cards remaining (0-{top}): "
         ).strip()
         try:
             count = int(raw)
         except ValueError:
             count = -1
-        if 0 <= count <= TOTAL_STOCK:
+        if 0 <= count <= top:
             return count
-        emit(f"Please enter a whole number from 0 to {TOTAL_STOCK}.")
+        emit(f"Please enter a whole number from 0 to {top}.")
 
 
-def setup(skip_tutorial=False):
+def setup(skip_tutorial=False, joker=False):
 
     if not skip_tutorial:
         explain()
@@ -1160,9 +1191,9 @@ Enter all 23 cards on ONE line.
         # A fresh deal has 52 - 28 tableau - 1 waste = 23 stock cards. Cleared
         # tableau cards (--) mean the game is under way, so the count is asked.
         stock = (
-            read_stock_count()
+            read_stock_count(joker=joker)
             if "--" in board
-            else TOTAL_STOCK
+            else TOTAL_STOCK + (1 if joker else 0)
         )
 
         stock_known = False
@@ -1171,7 +1202,7 @@ Enter all 23 cards on ONE line.
     # VALIDATE DECK (mistakes are corrected in place, not restarted)
     # ------------------------------------------------------------------
 
-    return repair_entry(board, waste, stock_known, stock)
+    return repair_entry(board, waste, stock_known, stock, joker=joker)
 
 
 # ======================================================================
@@ -1230,6 +1261,12 @@ def draw(game, read_card=read_rank, emit=print):
 
     if game.stock_empty:
         return False
+
+    # A stock holding the joker ends with it: nothing to ask for the last draw.
+    if game.joker_in_stock and game.stock_remaining == 1:
+        game.observe_draw(JOKER)
+        emit("DRAW -> joker (*)")
+        return True
 
     # The user only tells us what card actually appeared.
     card = read_card("DRAW -> ")
@@ -1435,9 +1472,13 @@ def simulate(
 
         else:
 
-            g.stock -= 1
-
-            g.waste = g.sample_unknown_card(rng)
+            if g.joker_in_stock and g.stock == 1:
+                g.stock = 0
+                g.joker_in_stock = False
+                g.waste = JOKER
+            else:
+                g.stock -= 1
+                g.waste = g.sample_unknown_card(rng)
 
     return (
         g.remaining() == 0
@@ -1659,7 +1700,7 @@ def main(argv=None):
     args = tritowers_cli.build_parser().parse_args(argv)
     # Always an explicit generator so undo can restore its state.
     rng = random.Random(args.seed)
-    game = review_setup(setup(skip_tutorial=args.skip_tutorial))
+    game = review_setup(setup(skip_tutorial=args.skip_tutorial, joker=getattr(args, "joker", False)))
 
     print()
     print("=" * 72)

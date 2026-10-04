@@ -59,3 +59,55 @@ def test_three_tower_geometry():
     assert pos[1][1] == pos[2][1] == pos[3][1] < pos[4][1]
     assert abs(pos[1][0] - (pos[4][0] + pos[5][0]) / 2) <= 1
     assert pos[19][1] == pos[28][1] > pos[10][1]
+
+
+import random as _random
+import pytest
+import solver
+from solver import Game
+
+FRESH = ["?"] * 28
+
+def game(stock=24, **kw): return Game(list(FRESH), "5", False, stock, joker_in_stock=True, **kw)
+
+def test_default_game_is_unchanged_52_cards():
+    g = Game(list(FRESH), "5", False, 23); assert g.joker_in_stock is False and g.stock_remaining == 23
+    with pytest.raises(ValueError): g.observe_draw("*")                      # no joker in a legacy game
+
+def test_count_includes_joker_and_pool_stays_ranked():
+    g = game(); assert g.stock_remaining == 24 and g.joker_in_stock
+    assert "*" not in g.unknown_card_pool() and len(g.unknown_card_pool()) == 51   # 52 ranks minus the waste 5
+    assert sum(g.unknown_counts().values()) == 51 and g.state_snapshot()["joker_in_stock"] is True
+
+def test_validation():
+    with pytest.raises(ValueError): Game(list(FRESH), "5", True, ["A"], joker_in_stock=True)   # known stock uses '*' directly
+    with pytest.raises(ValueError): Game(list(FRESH), "5", False, 0, joker_in_stock=True)
+    with pytest.raises(ValueError): Game(list(FRESH), "*", False, 24, joker_in_stock=True)     # only one joker
+    with pytest.raises(ValueError): Game(["A"] * 5 + ["?"] * 23, "5", False, 24, joker_in_stock=True)  # five aces
+
+def test_last_draw_is_the_joker_and_only_the_last():
+    g = game(2)
+    with pytest.raises(ValueError): g.observe_draw("*")                       # not last yet
+    g.observe_draw("K"); assert g.stock_remaining == 1 and g.waste == "K"
+    with pytest.raises(ValueError): g.observe_draw("Q")                       # last card must be the joker
+    assert g.observe_draw("*") == "*" and g.waste == "*" and g.stock_empty and not g.joker_in_stock
+
+def test_copy_carries_flag_and_does_not_alias():
+    g = game(); c = g.copy(); c.observe_draw("K"); assert g.stock_remaining == 24 and c.joker_in_stock and g.joker_in_stock
+
+def test_cli_draw_takes_joker_without_asking():
+    g = game(1); out = []
+    assert solver.draw(g, read_card=lambda p: (_ for _ in ()).throw(AssertionError("must not ask")), emit=out.append) is True
+    assert g.waste == "*" and "joker" in out[0]
+
+def test_sampled_rollout_draws_the_joker_last_and_wins_on_it():
+    g = Game(["--"] * 27 + ["K"], "5", False, 1, joker_in_stock=True)   # K cannot play on 5; the only draw is the joker, K plays on it
+    assert solver.simulate(g, rng=_random.Random(0)) is True
+
+def test_cli_flag_and_setup_count():
+    import tritowers_cli
+    assert tritowers_cli.build_parser().parse_args(["--joker"]).joker is True
+    assert tritowers_cli.build_parser().parse_args([]).joker is False
+    assert solver.read_stock_count(read_line=lambda p: "24", joker=True) == 24
+    out = []
+    assert solver.read_stock_count(read_line=(lambda it: lambda p: next(it))(iter(["24", "23"])), emit=out.append) == 23   # 24 refused without joker
