@@ -52,7 +52,7 @@ def test_full_flow(server, browser, vp):
     assert page.locator("#recBtn").is_disabled()
     reveal_all(page)
     page.wait_for_function("document.querySelectorAll('#board .c.ask').length==0")
-    assert "Stock left" in page.inner_text("main") and page.inner_text("#stk") == "23"
+    assert "Stock left" in page.inner_text("main") and page.inner_text("#stk") == "24"
     # board fits the viewport: every card inside the page width
     width = page.evaluate("document.documentElement.clientWidth")
     for box in page.locator("#board .c").evaluate_all("els=>els.map(e=>{const r=e.getBoundingClientRect();return [r.left,r.right]})"):
@@ -61,8 +61,8 @@ def test_full_flow(server, browser, vp):
     assert "estimate" in page.inner_text("#adv") or "Proven" in page.inner_text("#adv")
     assert page.locator("#board .c.rec").count() == 1
     page.click("#board .c.rec"); page.wait_for_function("document.getElementById('rem').textContent==='27'")
-    page.click("#drawBtn"); page.click('#keys button[data-k="4"]'); page.wait_for_function("document.getElementById('stk').textContent==='22'")
-    page.click("#undoBtn"); page.wait_for_function("document.getElementById('stk').textContent==='23'")
+    page.click("#drawBtn"); page.click('#keys button[data-k="4"]'); page.wait_for_function("document.getElementById('stk').textContent==='23'")
+    page.click("#undoBtn"); page.wait_for_function("document.getElementById('stk').textContent==='24'")
     assert not errors and "Error" not in page.inner_text("main")
     ctx.close()
 
@@ -85,8 +85,8 @@ def test_survives_dropped_requests(server, browser):
         else: route.continue_()
     page.route("**/api/act", flaky)
     page.click("#drawBtn"); page.click('#keys button[data-k="4"]')
-    page.wait_for_function("document.getElementById('stk').textContent==='22'", timeout=20000)
-    assert fails["n"] == 2 and page.inner_text("#stk") == "22"      # retried, applied exactly once
+    page.wait_for_function("document.getElementById('stk').textContent==='23'", timeout=20000)
+    assert fails["n"] == 2 and page.inner_text("#stk") == "23"      # retried, applied exactly once
 
 @pytest.mark.skipif(not (PHOTO and TEMPLATES and os.path.exists(PHOTO)), reason="private photo/templates not provided")
 def test_photo_full_frame_default(server, browser):
