@@ -25,3 +25,11 @@ class VisionTests(unittest.TestCase):
     def test_hidden_slot_no_rank(self):
         with self.assertRaises(ValueError):SlotObservation("t1",((0,0),(1,0),(1,1),(0,1)),(0,0,1,1),SlotState.COVERED,rank="A")
 if __name__=="__main__":unittest.main()
+
+
+class MpoIntakeTest(unittest.TestCase):
+    def test_iphone_style_mpo_is_accepted(self):
+        buf=io.BytesIO(); a=Image.new("RGB",(320,240),"navy"); b=Image.new("RGB",(320,240),"red")
+        a.save(buf,format="MPO",save_all=True,append_images=[b]); data=buf.getvalue()
+        self.assertEqual(Image.open(io.BytesIO(data)).format,"MPO")
+        out=normalize_image(data); self.assertEqual(out.size,(320,240)); self.assertLess(max(abs(p-q) for p,q in zip(out.getpixel((5,5)),(0,0,128))),6)
