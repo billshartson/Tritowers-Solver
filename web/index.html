@@ -44,7 +44,7 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
   <div class="tw"><div class="towers" id="editBoard"></div></div>
   <p class="sub">The 10 cards on the bottom row are face-up. Enter them here, or just press Start and I will ask for each one.</p>
   <div class="setrow"><div><div class="lbl">Waste card (required)</div><button class="wslot" id="wasteBtn" type="button">?</button></div>
-   <div><div class="lbl">Stock cards left <small>(machine counter minus 1: the last card is the joker)</small></div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">23</output><button class="b" id="stP" type="button" aria-label="more">+</button></div></div></div>
+   <div><div class="lbl">Stock cards left <small>(count the joker too: a fresh stock is 24, the joker is always the last card)</small></div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">24</output><button class="b" id="stP" type="button" aria-label="more">+</button></div><label style="display:block;margin-top:6px;font-size:14px"><input type="checkbox" id="jk" checked> This machine has a joker</label></div></div>
   <div id="stockOrder" hidden><div class="lbl">Stock order, next card drawn first (<span id="soN">0</span> entered; must match the stock count above)</div><div class="chips" id="soChips"></div><div class="row"><button class="b" id="soAdd" type="button">Add cards</button><button class="b" id="soClear" type="button">Clear stock</button></div></div>
   <details><summary>Paste the board as text</summary><p class="sub">28 entries, positions 1-28. A 2-10 J Q K, ? = face-down, -- = empty.</p><textarea id="paste" rows="3"></textarea><button class="b" id="pasteBtn" type="button" style="margin-top:6px">Use this text</button></details>
  </div>
@@ -77,7 +77,7 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
 <script>
 const RANKS=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const $=id=>document.getElementById(id);
-let sid=sessionStorage.getItem("tt_sid"),busy=false,geo=null,aspect=1.9,S=null,setup={board:Array(28).fill("?"),waste:"",stock:23,order:[],deal:false},SOL=null,step=0;
+let sid=sessionStorage.getItem("tt_sid"),busy=false,geo=null,aspect=1.9,S=null,setup={board:Array(28).fill("?"),waste:"",stock:24,joker:true,order:[],deal:false},SOL=null,step=0;
 function msg(t,cls){const m=$("msg");m.textContent=t||"";m.className=cls||""}
 function rid(){return (crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now())}
 const RETRY_MS=100000;   // keep retrying a failed request this long (the host's tunnel watchdog bounds outages at ~50 s)
@@ -151,12 +151,13 @@ let pollT=null,pollGen=0;function poll(){clearTimeout(pollT);const gen=++pollGen
     if(!busy){try{const r=await post("/api/act",{sid,op:"state"},{timeout:15000});if(gen===pollGen&&!busy&&r.ok&&r.advice){S=r;draw();return}}catch(e){}}
     pollT=setTimeout(tick,1500)};pollT=setTimeout(tick,1000)}
 $("recBtn").onclick=()=>act("recommend",{sims:1200},{timeout:70000});
-$("drawBtn").onclick=()=>keypad("Which card did you draw?",[],k=>act("draw",{rank:k}));
+$("drawBtn").onclick=()=>{if(S&&S.joker&&S.stock===1){act("draw",{rank:"*"});return}keypad("Which card did you draw?",[],k=>act("draw",{rank:k}))};
 $("undoBtn").onclick=()=>act("undo",{});
 $("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){sessionStorage.removeItem("tt_sid");sid=null;S=null;$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
 $("editBoard").onclick=e=>{const b=e.target.closest(".c");if(!b)return;const p=+b.dataset.p;keypad("Set position "+p,["?","--"],k=>{setup.board[p-1]=k;drawEdit()})};
 $("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{setup.waste=k;drawEdit()});
-$("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(24,setup.stock+1);drawEdit()};
+$("jk").onchange=()=>{setup.joker=$("jk").checked;if(!setup.joker&&setup.stock>23)setup.stock=23;if(setup.joker&&setup.stock===23)setup.stock=24;drawEdit()};
+$("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(setup.joker?24:23,setup.stock+1);drawEdit()};
 $("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}setup.board=t.map(x=>x.toUpperCase());drawEdit();msg("Board set from text.")};
 $("photoBtn").onclick=()=>$("photo").click();
 $("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Reading photo…");$("photoNote").textContent="";$("photoView").hidden=true;
@@ -169,7 +170,7 @@ $("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Read
   catch(e){msg("Could not upload the photo. Try again.","err")}$("photo").value=""};
 $("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
   busy=true;msg("");$("startBtn").textContent="Starting…";
-  try{const r=await post("/api/new",{board:setup.board.join(" "),waste:setup.waste,stock:setup.stock});busy=false;
+  try{const r=await post("/api/new",{board:setup.board.join(" "),waste:setup.waste,stock:setup.stock,joker:setup.joker});busy=false;
     if(!r.ok){msg(r.message,"err");return}
     sid=r.sid;sessionStorage.setItem("tt_sid",sid);S=r;draw();msg(r.pending&&r.pending.length?"Tap each yellow ? and pick the card.":"")}
   catch(e){busy=false;msg("Could not reach the server after about 100 s. Your board is kept - press Start again.","err")}finally{$("startBtn").textContent="Start game"}};
