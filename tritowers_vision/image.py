@@ -7,7 +7,7 @@ from PIL import Image,ImageOps,UnidentifiedImageError
 try:
     from pillow_heif import register_heif_opener; register_heif_opener()  # iPhone HEIC/HEIF photos
 except ImportError: pass
-MAX_BYTES=12*1024*1024; MAX_PIXELS=20_000_000; MIN_SIDE=160; MIN_QUAD_AREA=1000.0; MIN_EDGE=20.0; OUTPUT_SIZE=(1024,768); ALLOWED_FORMATS={"JPEG","PNG","WEBP","HEIF","HEIC"}
+MAX_BYTES=60*1024*1024; MAX_INPUT_PIXELS=150_000_000; MAX_PIXELS=20_000_000; MIN_SIDE=160; MIN_QUAD_AREA=1000.0; MIN_EDGE=20.0; OUTPUT_SIZE=(1024,768); ALLOWED_FORMATS={"JPEG","MPO","PNG","WEBP","HEIF","HEIC"}
 class ImageInputError(ValueError): pass
 @dataclass(frozen=True)
 class ScreenExtraction:
@@ -17,17 +17,25 @@ def _read_bounded(source:str|Path|BinaryIO|bytes)->bytes:
     if isinstance(source,bytes): data=source
     elif isinstance(source,(str,Path)):
         path=Path(source)
-        if path.stat().st_size>MAX_BYTES: raise ImageInputError("Image exceeds the 12 MB upload limit.")
+        if path.stat().st_size>MAX_BYTES: raise ImageInputError(f"Image exceeds the {MAX_BYTES//(1024*1024)} MB upload limit.")
         data=path.read_bytes()
     else: data=source.read(MAX_BYTES+1)
-    if len(data)>MAX_BYTES: raise ImageInputError("Image exceeds the 12 MB upload limit.")
+    if len(data)>MAX_BYTES: raise ImageInputError(f"Image exceeds the {MAX_BYTES//(1024*1024)} MB upload limit.")
     return data
 
 def normalize_image(source)->Image.Image:
     try:
         with Image.open(BytesIO(_read_bounded(source))) as image:
             if image.format not in ALLOWED_FORMATS: raise ImageInputError(f"Unsupported image format: {image.format}")
-            if image.width*image.height>MAX_PIXELS: raise ImageInputError("Image exceeds the 20 megapixel limit.")
+            if image.width*image.height>MAX_INPUT_PIXELS: raise ImageInputError(f"Image exceeds the {MAX_INPUT_PIXELS//1_000_000} megapixel safety limit.")
+            if image.width*image.height>MAX_PIXELS:
+                # Big phone photos are shrunk on import to the working size (area MAX_PIXELS). JPEG decodes at reduced size.
+                scale=(MAX_PIXELS/(image.width*image.height))**0.5
+                if image.format in ("JPEG","MPO"): image.draft("RGB",(max(1,int(image.width*scale)),max(1,int(image.height*scale))))
+                image=ImageOps.exif_transpose(image).convert("RGB")
+                if image.width*image.height>MAX_PIXELS:
+                    s2=(MAX_PIXELS/(image.width*image.height))**0.5; image=image.resize((max(1,int(image.width*s2)),max(1,int(image.height*s2))),Image.LANCZOS)
+                return image
             return ImageOps.exif_transpose(image).convert("RGB").copy()
     except (UnidentifiedImageError,OSError) as error: raise ImageInputError("Could not decode this image.") from error
 
