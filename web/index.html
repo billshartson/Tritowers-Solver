@@ -123,7 +123,7 @@ function draw(){
 function setBusy(b){busy=b;if(S)draw()}
 function keypad(title,extra,cb){
   $("sheetT").textContent=title;
-  $("keys").innerHTML=[...RANKS,...extra].map(k=>`<button type="button" data-k="${k}">${k==="--"?"empty":k}</button>`).join("");
+  $("keys").innerHTML=[...RANKS,...extra].map(k=>`<button type="button" data-k="${k}">${k==="--"?"empty":k==="*"?"joker":k}</button>`).join("");
   $("sheet").classList.add("open");
   $("keys").onclick=e=>{const k=e.target.dataset&&e.target.dataset.k;if(!k)return;$("sheet").classList.remove("open");cb(k)};
 }
@@ -156,7 +156,7 @@ $("undoBtn").onclick=()=>act("undo",{});
 $("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){sessionStorage.removeItem("tt_sid");sid=null;S=null;$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
 $("editBoard").onclick=e=>{const b=e.target.closest(".c");if(!b)return;const p=+b.dataset.p;keypad("Set position "+p,["?","--"],k=>{setup.board[p-1]=k;drawEdit()})};
 $("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{setup.waste=k;drawEdit()});
-$("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(23,setup.stock+1);drawEdit()};
+$("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(24,setup.stock+1);drawEdit()};
 $("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}setup.board=t.map(x=>x.toUpperCase());drawEdit();msg("Board set from text.")};
 $("photoBtn").onclick=()=>$("photo").click();
 $("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Reading photo…");$("photoNote").textContent="";$("photoView").hidden=true;
@@ -186,9 +186,9 @@ function setMode(deal){setup.deal=deal;$("modePlay").classList.toggle("on",!deal
   drawStock()}
 function drawStock(){showDeck();$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip" data-i="${i}" aria-label="Stock card ${i+1}">${c}</button>`).join("")}
 $("modePlay").onclick=()=>setMode(false);$("modeDeal").onclick=()=>setMode(true);
-$("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1),["remove"],k=>{if(k==="remove")setup.order.splice(i,1);else setup.order[i]=k;drawStock()})};
+$("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1),["remove","*"],k=>{if(k==="remove")setup.order.splice(i,1);else setup.order[i]=k;drawStock()})};
 $("soClear").onclick=()=>{setup.order=[];drawStock()};
-function addMany(){keypad("Next stock card ("+setup.order.length+" so far)",[],k=>{setup.order.push(k);drawStock();if(setup.order.length<23)setTimeout(addMany,0)})}
+function addMany(){keypad("Next stock card ("+setup.order.length+" so far). Use * for the joker: it is always the last stock card.",["*"],k=>{setup.order.push(k);drawStock();if(k!=="*"&&setup.order.length<24)setTimeout(addMany,0)})}
 $("soAdd").onclick=addMany;
 function showStep(){const f=SOL.frames[step];$("solN").textContent=step;$("solT").textContent=SOL.steps.length;$("solW").textContent=f.waste;$("solS").textContent=f.stock;
   $("solBoard").innerHTML=boardHTML(f.cells,"play");if(f.next)$("solBoard").querySelector(`[data-p="${f.next}"]`).classList.add("rec");
