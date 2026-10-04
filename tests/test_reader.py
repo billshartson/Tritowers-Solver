@@ -112,5 +112,5 @@ def test_web_photo_endpoint_returns_a_checkable_draft():
     assert r["ok"] and len(r["board"]) == 28 and r["overlay"].startswith("data:image/jpeg;base64,")
     _check({"cards": {**{f"tableau-{i:02d}": {"state": "empty" if t == "--" else "x", "rank": None if t in ("?", "--") else t}
                          for i, t in enumerate(r["board"], 1)}, "waste": {"rank": r["waste"] or None}}}, deal)
-    too_big = client.post("/api/photo", files={"file": ("s.png", b"0" * (13 * 1024 * 1024), "image/png")}, data={"corners": ""}).json()
+    too_big = client.post("/api/photo", files={"file": ("s.png", b"0" * (61 * 1024 * 1024), "image/png")}, data={"corners": ""}).json()
     assert not too_big["ok"] and "too large" in too_big["message"]
