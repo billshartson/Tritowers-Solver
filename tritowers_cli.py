@@ -60,6 +60,8 @@ def format_board(game):
         f"Waste: {state['waste']} | Tableau: {state['remaining']} | "
         f"Stock: {state['stock_remaining']}"
     )
+    if state["joker_in_stock"]:
+        rendered.append("Stock count includes the joker, which is the last card.")
     return "\n".join(rendered)
 
 
