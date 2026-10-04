@@ -111,3 +111,18 @@ def test_joker_must_be_last_and_only_one():
     assert r["ok"] is False and "joker" in r["message"].lower()
     r = client.post("/api/solve", json={"board": " ".join(board), "waste": waste, "stock": stock, "stock_count": 25}).json()
     assert r["ok"] is False
+
+
+def test_play_along_joker_session_draws_the_joker_last():
+    b = ["?"] * 18 + ["A", "2", "3", "4", "7", "8", "9", "10", "J", "Q"]          # exposed bottom row known, so no reveals are pending
+    r = client.post("/api/new", json={"board": " ".join(b), "waste": "5", "stock": 2, "joker": True, "sid": "jk1"}).json()
+    assert r["ok"] and r["joker"] is True and r["stock"] == 2
+    r = client.post("/api/act", json={"sid": "jk1", "op": "draw", "rank": "*"}).json(); assert not r["ok"]      # joker is only the last card
+    r = client.post("/api/act", json={"sid": "jk1", "op": "draw", "rank": "K"}).json(); assert r["ok"] and r["stock"] == 1 and r["waste"] == "K"
+    r = client.post("/api/act", json={"sid": "jk1", "op": "draw"}).json()                                       # last card: no rank needed
+    assert r["ok"] and r["waste"] == "*" and r["stock"] == 0 and r["joker"] is False
+
+def test_joker_session_cap_and_legacy_default():
+    b = " ".join(["?"] * 28)
+    assert not client.post("/api/new", json={"board": b, "waste": "5", "stock": 24}).json()["ok"]            # legacy cap 23
+    r = client.post("/api/new", json={"board": b, "waste": "5", "stock": 24, "joker": True}).json(); assert r["ok"] and r["stock"] == 24

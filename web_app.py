@@ -46,7 +46,7 @@ def view(entry, message="", ok=True, extra=None):
         cells.append({"p": p, "card": card, "kind": kind, "x": GEO[p][0], "y": GEO[p][1]})
     over = g.remaining() == 0
     out = {"ok": ok, "message": message, "cells": cells, "aspect": ASPECT, "waste": snap["waste"], "remaining": snap["remaining"],
-           "stock": snap["stock_remaining"], "status": ui.status(s), "pending": sorted(pend), "over": over,
+           "stock": snap["stock_remaining"], "joker": bool(snap.get("joker_in_stock")), "status": ui.status(s), "pending": sorted(pend), "over": over,
            "can_undo": bool(s.history), "can_draw": (not over) and (not pend) and snap["stock_remaining"] > 0,
            "log": s.log[-12:], "advice": advice, "rev": len(s.log)}
     if extra: out.update(extra)
@@ -70,7 +70,7 @@ def health(): return {"ok": True, "templates": len(_templates())}
 @app.post("/api/new")
 def api_new(body: dict):
     try:
-        s = ui.new_session(body.get("board", ""), str(body.get("waste", "")).strip(), body.get("stock", 23))
+        s = ui.new_session(body.get("board", ""), str(body.get("waste", "")).strip(), body.get("stock", 23), joker=bool(body.get("joker", False)))
         if not str(body.get("waste", "")).strip(): raise ValueError("Pick the waste card first.")
     except Exception as e: return {"ok": False, "message": str(e)}
     sid = body.get("sid") or uuid.uuid4().hex
@@ -126,7 +126,7 @@ def _do(entry, op, body):
         before = s.game.board[ui.to_int(body.get("pos"), "Position", 1, 28) - 1]
         ui.do_play(s, body.get("pos")); entry["advice"] = None; msg = s.log[-1]
     elif op == "reveal": ui.do_reveal(s, body.get("pos"), str(body.get("rank", ""))); entry["advice"] = None; msg = s.log[-1]
-    elif op == "draw": ui.do_draw(s, str(body.get("rank", ""))); entry["advice"] = None; msg = s.log[-1]
+    elif op == "draw": ui.do_draw(s, "*" if (s.game.joker_in_stock and s.game.stock_remaining == 1) else str(body.get("rank", ""))); entry["advice"] = None; msg = s.log[-1]
     elif op == "state": msg = ""
     elif op == "undo": s.undo(); entry["advice"] = None; msg = s.log[-1]
     elif op == "recommend":
