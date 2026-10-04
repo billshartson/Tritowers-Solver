@@ -192,7 +192,7 @@ def api_solve(body: dict):
     if not isinstance(raw_stock, (list, tuple)): return {"ok": False, "message": "Stock must be a list of cards in draw order."}
     stock = [str(x).strip() for x in raw_stock]
     try:
-        stock_count = None if body.get("stock_count") is None else ui.to_int(body.get("stock_count"), "Stock count", 0, 23)
+        stock_count = None if body.get("stock_count") is None else ui.to_int(body.get("stock_count"), "Stock count", 0, 24)
         budget_in = float(body.get("time_budget", 20))
     except Exception as e: return {"ok": False, "message": str(e) if "Stock count" in str(e) else "Time budget must be a number."}
     missing = []

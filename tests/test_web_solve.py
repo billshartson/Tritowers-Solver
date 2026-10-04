@@ -91,3 +91,23 @@ def test_malformed_solve_inputs_never_500():
     for extra in ({"stock_count": "x"}, {"time_budget": "x"}, {"stock": "AAAA"}, {"stock_count": 1.5}, {"stock_count": -1}, {"stock": None}):
         r = client.post("/api/solve", json={"board": " ".join(BOARD), "waste": "5", "stock": [], **extra})
         assert r.status_code == 200 and "ok" in r.json(), (extra, r.status_code)
+
+
+def _joker_deal(seed):
+    import random
+    cards = [r for r in web_app.RANKS for _ in range(4)]; random.Random(seed).shuffle(cards)
+    return cards[:28], cards[28], cards[29:] + ["*"]
+
+def test_joker_deal_accepts_24_stock_and_verifies_line():
+    board, waste, stock = _joker_deal(1)
+    r = client.post("/api/solve", json={"board": " ".join(board), "waste": waste, "stock": stock, "stock_count": 24, "time_budget": 4}).json()
+    assert r["ok"] is True and r["status"] in ("solved", "unsolvable", "unknown"), r
+    if r["status"] == "solved": assert r["frames"][-1]["remaining"] == 0     # line was replayed with the joker in the stock
+
+def test_joker_must_be_last_and_only_one():
+    board, waste, stock = _joker_deal(2)
+    bad = ["*"] + stock[:-1]
+    r = client.post("/api/solve", json={"board": " ".join(board), "waste": waste, "stock": bad, "stock_count": 24}).json()
+    assert r["ok"] is False and "joker" in r["message"].lower()
+    r = client.post("/api/solve", json={"board": " ".join(board), "waste": waste, "stock": stock, "stock_count": 25}).json()
+    assert r["ok"] is False
