@@ -1,7 +1,12 @@
 """Private prototype. No image data in manifests; runtime data never committed."""
-import hashlib,numpy as np
+import hashlib,json,numpy as np
 REASONS={'wrong_neighbour','blank','partial','clean'}
-def digest(g):return hashlib.sha256(np.ascontiguousarray(g).tobytes()).hexdigest()
+def digest(g):
+ a=np.asarray(g)
+ if a.dtype.hasobject or a.ndim!=2 or not a.size:raise ValueError('Invalid crop')
+ if not np.isfinite(a).all():raise ValueError('Nonfinite crop')
+ metadata=json.dumps({'shape':list(a.shape),'dtype':a.dtype.str,'schema':'rank-crop-v2'},sort_keys=True,separators=(',',':')).encode()
+ return hashlib.sha256(metadata+b'\0'+np.ascontiguousarray(a).tobytes()).hexdigest()
 def validate(data,manifest):
  expected={(h,i) for h,items in data.items() for i in range(len(items))};seen=set()
  for sample in manifest['samples']:
