@@ -32,4 +32,12 @@ class Tests(unittest.TestCase):
   n=apply_review(self.data,self.m,'synthetic-a',0,self.m['samples'][0]['crop_sha256'],'partial');self.assertEqual(n['samples'][0]['decision'],'reject');self.assertEqual(self.m['samples'][0]['decision'],'approve')
  def test_stale_review(self):
   with self.assertRaises(ValueError):apply_review(self.data,self.m,'synthetic-a',0,'bad','clean')
+ def test_hash_shape_matters(self):
+  a=np.arange(768,dtype=np.float32);self.assertNotEqual(digest(a.reshape(32,24)),digest(a.reshape(24,32)))
+ def test_hash_dtype_matters(self):
+  a=np.arange(4,dtype=np.float32).reshape(2,2);self.assertNotEqual(digest(a),digest(a.view(np.int32)))
+ def test_hash_contiguous_layout_invariant(self):
+  a=np.arange(12,dtype=np.float32).reshape(3,4).T;self.assertEqual(digest(a),digest(np.ascontiguousarray(a)))
+ def test_hash_nonfinite_rejected(self):
+  with self.assertRaises(ValueError):digest(np.array([[np.nan]]))
 if __name__=='__main__':unittest.main()
