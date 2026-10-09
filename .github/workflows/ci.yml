@@ -40,7 +40,7 @@ jobs:
       - name: Install
         run: python -m pip install -r requirements.txt pytest httpx
       - name: Vision tests
-        run: python -m pytest -q tests/test_reader.py tests/test_vision.py tests/test_calibrated.py tests/test_rank2.py tests/test_annotation.py
+        run: python -m pytest -q tests/test_reader.py tests/test_vision.py tests/test_calibrated.py tests/test_rank2.py tests/test_annotation.py tests/test_curation.py
   browser:
     name: Browser end-to-end
     runs-on: ubuntu-latest
