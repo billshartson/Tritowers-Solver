@@ -7,3 +7,27 @@ This is separate from the existing 28-tableau photo reader. It does not replace 
 25 synthetic tests cover detection, extraction, geometry and draft boundaries. Private research reached 208/208 rank proposals with other-photo templates from 191 visually complete crops on the same four tuning photos. Normalization, geometry and matcher choices were tuned on that set, so this is not independent performance. Manual row guides remain required. Negative tests rejected all 208 individually masked ranks on that same set; this is not a general safety guarantee.
 
 Nothing is deployed. Private images, crops, manifests and evaluation harnesses must stay outside the repository.
+
+## Owned-foreground experimental path
+
+`draw_consensus.consensus(image, row_guides, expected_counts)` checks three
+ink thresholds and requires at least two consistent ordered assignments.
+Bounded short overlapping fragments can be joined before subset assignment.
+Spacing, endpoint, near-tie and disjoint-ownership guards still reject.
+
+`draw_ownership.paired(image, boxes, expected_counts)` supplies hard foreground
+and a one-pixel antialias halo of the same owned components to the existing
+review-only matcher. Row height and neighbour boundaries define ownership;
+fragment-centre recovery requires intact neighbours on both sides. Neither
+rank labels nor matching scores choose the crop. Callers must construct their
+private template bank with this same paired normalization.
+
+18 additional synthetic tests cover fragment guards, input validation,
+foreground ownership, review boundaries and concurrent threshold reads.
+Private tuning probes retain 208/208 proposals after tested area-resize and
+known-inverse affine resampling. Known inverses diagnose interpolation loss,
+not recovery from an unknown camera angle. These remain the same four tuning
+photos, not independent validation. Some partial right edges and stray ink
+remain visible, so score-only acceptance is still forbidden.
+
+This path is not wired into the UI or solver and nothing is deployed.

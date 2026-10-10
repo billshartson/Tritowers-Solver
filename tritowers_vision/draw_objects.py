@@ -10,13 +10,13 @@ def ink_mask(bgr):
     red=(r>110)&(g<85)&(b<95)&(r-g>60)
     return (dark|red).astype(np.uint8)
 
-def detect(image, row_guides):
+def detect(image, row_guides, mask_fn=None):
  im=np.asarray(image)
  if im.ndim!=3 or im.shape[2]!=3 or im.dtype!=np.uint8 or not np.isfinite(im).all():raise ValueError('Expected uint8 BGR image')
  guides=np.asarray(row_guides,dtype=float)
  if guides.ndim!=3 or guides.shape[1:]!=(2,2) or not np.isfinite(guides).all():raise ValueError('Expected finite row guides')
  if np.any(np.linalg.norm(guides[:,1]-guides[:,0],axis=1)<100):raise ValueError('Row guide too short')
- m=ink_mask(im);gray=cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
+ m=(ink_mask if mask_fn is None else mask_fn)(im);gray=cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
  bright=cv2.morphologyEx((gray>135).astype(np.uint8),cv2.MORPH_CLOSE,np.ones((25,25),np.uint8))
  m=m;m=cv2.morphologyEx(m,cv2.MORPH_OPEN,np.ones((2,2),np.uint8));m=cv2.dilate(m,np.ones((3,9),np.uint8))
  nc,lab,st,cen=cv2.connectedComponentsWithStats(m);rows=[]
