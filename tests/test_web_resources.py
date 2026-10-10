@@ -172,8 +172,8 @@ def test_photo_reads_only_bounded_input_and_does_not_leak_exception(monkeypatch)
         def read(self, amount): reads.append(amount); return b"invalid"
     result = web_app.api_photo(UploadFile(filename="bad.jpg", file=Source()), corners="")
     assert not result["ok"] and reads == [MAX_BYTES + 1]
-    from tritowers_vision import reader
-    monkeypatch.setattr(reader, "read_photo", lambda *args: (_ for _ in ()).throw(RuntimeError("secret-path")))
+    from tritowers_vision import intake
+    monkeypatch.setattr(intake, "read_photo", lambda *args: (_ for _ in ()).throw(RuntimeError("secret-path")))
     result = web_shared.photo_response(b"x")
     assert not result["ok"] and "secret-path" not in result["message"]
 

@@ -74,7 +74,8 @@ def solve_deal(body):
     missing = []
     if len(board) != 28: return {"ok": False, "message": f"Need 28 board entries, got {len(board)}."}
     missing += [f"tableau position {i}" for i, c in enumerate(board, 1) if c == "?"]
-    if not waste: missing.append("waste card")
+    if not waste or waste == "?": missing.append("waste card")
+    missing += [f"stock card {i}" for i, c in enumerate(stock, 1) if c == "?"]
     if stock_count is not None and stock_count != len(stock): missing.append(f"stock order ({len(stock)} of {stock_count} cards entered)")
     if missing:
         return {"ok": True, "status": "incomplete", "message": "The deal is not complete, so I will not guess. Missing: " + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "") + ".", "missing": missing}
@@ -118,7 +119,8 @@ def photo_response(data, corners="", templates=None):
     """Read a photo into the same draft response in HTTP and the browser worker."""
     import base64, io
     from tritowers_vision.image import MAX_BYTES, ImageInputError
-    from tritowers_vision.reader import board_tokens, read_photo
+    from tritowers_vision.reader import board_tokens
+    from tritowers_vision.intake import read_photo
     if len(data) > MAX_BYTES: return {"ok": False, "message": f"Image is too large ({MAX_BYTES // (1024 * 1024)} MB max)."}
     manual = None
     try: corners = _text(corners, "Corners", 256)
@@ -135,13 +137,26 @@ def photo_response(data, corners="", templates=None):
         log.exception("Photo recognition failed")
         return {"ok": False, "message": "Could not read that image. Try a clear JPEG, PNG or HEIC photo of the whole screen."}
     d = r.draft; tokens, waste = board_tokens(d)
-    review = [s.replace("tableau-", "").lstrip("0") if s != "waste" else "waste" for s in d["needs_human_review"]]
+    def review_id(slot):
+        if slot.startswith("tableau-"): return str(int(slot.split("-")[1]))
+        if slot.startswith("stock-"): return "stock-" + str(int(slot.split("-")[1]))
+        return slot
+    review = [review_id(s) for s in d["needs_human_review"]]
+    full_deal = d.get("photo_kind") == "full_deal"
     if not d["registration"]["trusted"]:
         note = "The card layout was not found reliably, so check every card (a straighter photo of the whole screen helps). "
     else:
         note = ("Check: " + ", ".join(review) + ". " if review else "")
-    note += "Suit and the stock counter are not read: set the stock yourself. Check the picture before you start."
+    if full_deal:
+        note += "Full-deal grid: the first two rows fill the 28 board positions. The rightmost bottom card is the waste. Stock runs right to left, with the joker last. Check every rank and this draw order before solving."
+    else:
+        note += "Suit and the stock counter are not read: set the stock yourself. Check the picture before you start."
     view = r.overlay.copy(); view.thumbnail((900, 900))
     buf = io.BytesIO(); view.save(buf, format="JPEG", quality=80)
-    return {"ok": True, "board": tokens, "waste": waste, "note": note, "review": review,
-            "trusted": d["registration"]["trusted"], "overlay": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}
+    response = {"ok": True, "mode": "full_deal" if full_deal else "tableau",
+                "board": tokens, "waste": waste, "note": note, "review": review,
+                "trusted": d["registration"]["trusted"], "overlay": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}
+    if full_deal:
+        response.update(stock=list(d["stock"]), stock_count=len(d["stock"]),
+                        joker=True, draw_direction="right_to_left")
+    return response

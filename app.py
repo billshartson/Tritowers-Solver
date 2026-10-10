@@ -5,7 +5,8 @@ import solver_ui as ui
 from tritowers_vision.image import ImageInputError, MAX_BYTES, order_corners
 from web_shared import solve_deal
 from tritowers_vision.rank import load_templates
-from tritowers_vision.reader import board_tokens, read_photo
+from tritowers_vision.reader import board_tokens
+from tritowers_vision.intake import read_photo
 TEMPLATES = load_templates(os.environ["TT_TEMPLATES"]) if os.environ.get("TT_TEMPLATES") and os.path.exists(os.environ["TT_TEMPLATES"]) else []
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 
@@ -21,7 +22,7 @@ def draft_to_board_text(draft):
     return " ".join(tokens), waste
 
 def inspect_image(path, corners_text):
-    if not path: return None, None, {"unsupported_reason": "no_image"}, {}, "", "", "Upload an image first."
+    if not path: return None, None, {"unsupported_reason": "no_image"}, {}, "", "", "Upload an image first.", ""
     try: manual = parse_corners(corners_text)
     except (ValueError, TypeError): raise gr.Error("Corners need four distinct, finite x,y points around the screen.")
     try:
@@ -37,8 +38,12 @@ def inspect_image(path, corners_text):
         msg = "The card layout was not found reliably, so every card needs checking. Try a straighter photo with the whole screen in view, or enter the four screen corners."
     else:
         msg = ("Check the yellow slots: " + ", ".join(s.replace("tableau-", "") for s in review) + "." if review else "Every card was read; still check the picture.")
-    msg += " Suit and the stock counter are not read: enter the stock yourself (the HUD may show engine stock + 1; unverified)."
-    return r.overlay, r.rectified, reg, d, board, waste, msg
+    stock_order = " ".join(d.get("stock", []))
+    if d.get("photo_kind") == "full_deal":
+        msg += " Full-deal grid: review the 28 board cards, waste and stock, then copy to Known deal. Stock is read right to left from the bottom row, with the joker last; check that draw order before solving."
+    else:
+        msg += " Suit and the stock counter are not read: set the stock count yourself, including the joker."
+    return r.overlay, r.rectified, reg, d, board, waste, msg, stock_order
 
 def start(board, waste, stock, joker=False):
     if not (waste or "").strip(): raise gr.Error("Choose the waste card before starting.")
@@ -97,9 +102,11 @@ with gr.Blocks(title="TriTowers") as demo:
         go = gr.Button("Read photo", variant="primary"); note = gr.Markdown()
         with gr.Row(): overlay = gr.Image(label="What was read (green read, yellow check, red covered, grey empty)"); rectified = gr.Image(label="Rectified screen")
         pboard = gr.Textbox(label="Draft board (edit before use)", lines=3); pwaste = gr.Textbox(label="Draft waste")
+        pstock = gr.Textbox(label="Draft stock order from a full-deal grid, next draw first (edit ? entries before solving)")
         with gr.Accordion("Raw recognition output", open=False): result = gr.JSON(label="Layout alignment"); draft = gr.JSON(label="Draft")
-        go.click(inspect_image, [upload, corners], [overlay, rectified, result, draft, pboard, pwaste, note])
+        go.click(inspect_image, [upload, corners], [overlay, rectified, result, draft, pboard, pwaste, note, pstock])
         send = gr.Button("Copy draft to Solver tab"); send.click(lambda b, w: (b, w), [pboard, pwaste], [board, waste])
+        send_known = gr.Button("Copy reviewed draft to Known deal tab")
     with gr.Tab("Known deal"):
         gr.Markdown("Enter every remaining tableau rank and the complete remaining stock order. Cleared positions use --. Covered unknown ranks cannot be solved exactly.")
         known_board = gr.Textbox(label="28 tableau positions", lines=3)
@@ -109,6 +116,7 @@ with gr.Blocks(title="TriTowers") as demo:
         solve_message = gr.Markdown()
         solve_steps = gr.Textbox(label="Verified steps", lines=12, interactive=False)
         solve_button.click(complete_deal, [known_board, known_waste, known_stock], [solve_message, solve_steps])
+    send_known.click(lambda b, w, s: (b, w, s), [pboard, pwaste, pstock], [known_board, known_waste, known_stock])
 
 demo.queue(max_size=32, default_concurrency_limit=1)
 

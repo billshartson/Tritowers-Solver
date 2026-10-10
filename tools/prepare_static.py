@@ -17,7 +17,7 @@ PYODIDE_VERSION = '314.0.7'
 RUNTIME_URL = f'https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/'
 HEIC_URL = 'https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js'
 MODULES = ('solver.py', 'solver_ui.py', 'tritowers_cli.py', 'web_core.py', 'web_shared.py')
-VISION = ('__init__.py', 'image.py', 'reader.py', 'register.py', 'automatic.py', 'scene.py', 'glyphs.py', 'rank.py', 'rank2.py', 'layout.py', 'schema.py', 'recognizer.py', 'occupancy.py', 'annotation.py')
+VISION = ('__init__.py', 'image.py', 'intake.py', 'full_deal.py', 'reader.py', 'register.py', 'automatic.py', 'scene.py', 'glyphs.py', 'rank.py', 'rank2.py', 'layout.py', 'schema.py', 'recognizer.py', 'occupancy.py', 'annotation.py')
 WEB = ('photo-input.js', 'heic-worker.js', 'tt-bridge.js', 'pw.js')
 
 

@@ -34,13 +34,18 @@ If setup cards cannot be a real deck (a rank entered more than four times), the 
 ## Photo reader
 
 `app.py` (Gradio, "Photo to board" tab) and `web_app.py` (`/api/photo`, the "Read from a photo" button) turn a
-screenshot or phone photo of the machine screen into a draft board. The reader (`tritowers_vision/reader.py`) finds
-the card layout in the image (no exact crop or screen border needed), decides which cards are still on the table using
-the game rules, reads the rank of every exposed card and the waste card, and returns a picture showing what it read.
-Anything it is not sure of stays `?` and is listed for checking; it never guesses hidden cards, suits or the stock.
-It is calibrated on one skin (see `MODEL_CARD.md`).
+screenshot or phone photo of the machine screen into an editable draft. Photo intake automatically distinguishes
+the normal three-tower board from the full-deal grid. Both readers return an overlay and mark unreadable ranks `?`.
+They are calibrated on one skin (see `MODEL_CARD.md`); hidden ranks are never guessed.
 
 The automatic path needs no bank upload or row calibration. Browser photos are oriented and resized to a 1600px long edge before recognition, with an optional software HEIC decoder running locally in its own worker. The HTTP path also accepts HEIC through Pillow. Uncertain geometry stays unknown, and the board highlights corrections before one **Confirm board & start** action enters play-along. Set the stock counter yourself; a tableau photo cannot reveal the stock order.
+
+For the **grid showing all cards**, choose the photo in the same upload control. Its first two rows (14 cards each)
+fill the 28 tableau positions. The bottom row's rightmost card is the waste; the other 23 normal cards, read right
+to left, form the stock with the leftmost joker last. This direction is inferred from the machine layout: check
+it against your game. The app switches to **I know the whole deal**, shows numbered stock cards in draw order,
+and lets you correct every rank before **Confirm deal & solve**. Unknown board, waste or stock ranks block solving
+until corrected. In Gradio, use **Copy reviewed draft to Known deal tab** after reviewing the photo output.
 
 The recognizer ships a bank rendered from open fonts, never owner photos or photo-derived templates. `TT_FONT_TIER=0` disables font matching. `TT_TEMPLATES` remains an optional local research setting on the HTTP adapter; the static app has no private-bank loader.
 

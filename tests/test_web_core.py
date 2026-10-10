@@ -134,7 +134,7 @@ def test_recommend_uses_server_simulation_cap_and_action_clears_advice(monkeypat
 
 
 def test_corrected_photo_draft_stays_unknown_and_follows_play_along(monkeypatch):
-    from tritowers_vision import reader
+    from tritowers_vision import intake
     bottom = ["9", "3", "4", "5", "6", "7", "8", "9", "10", "J"]
     cards = {f"tableau-{p:02d}": {"state": "covered" if p <= 18 else "face_up",
              "rank": None if p <= 18 else bottom[p-19]} for p in range(1, 29)}
@@ -144,7 +144,7 @@ def test_corrected_photo_draft_stays_unknown_and_follows_play_along(monkeypatch)
     def read(data, templates, corners):
         assert templates == [] and corners is None
         return SimpleNamespace(draft=draft, overlay=Image.new("RGB", (20, 20), "green"))
-    monkeypatch.setattr(reader, "read_photo", read)
+    monkeypatch.setattr(intake, "read_photo", read)
     photo = core.api_photo(b"synthetic adapter fixture")
     assert photo["ok"] and photo["trusted"] and photo["board"][:18] == ["?"] * 18
     assert photo["review"] == ["19"] and photo["overlay"].startswith("data:image/jpeg;base64,")
@@ -168,7 +168,8 @@ def solve(**extra):
 
 
 @pytest.mark.parametrize("extra,missing", [({"board": "? " * 28}, "tableau position"),
-    ({"stock_count": 2}, "stock order"), ({"waste": ""}, "waste card")])
+    ({"stock_count": 2}, "stock order"), ({"waste": ""}, "waste card"),
+    ({"stock": ["?", "*"], "stock_count": 2}, "stock card 1"), ({"waste": "?"}, "waste card")])
 def test_incomplete_exact_input_is_never_filled_in(extra, missing):
     result = solve(**extra)
     assert result["ok"] and result["status"] == "incomplete" and missing in result["message"]

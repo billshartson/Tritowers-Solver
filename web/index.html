@@ -22,13 +22,13 @@ button.b.pri{background:var(--pri);color:#fff}button.b:disabled{opacity:.45;curs
 .stepper{display:flex;align-items:center;gap:10px}.stepper button{width:48px;height:48px;font-size:24px}.stepper output{font-size:24px;font-weight:700;min-width:44px;text-align:center}
 .wslot{width:64px;height:84px;border-radius:9px;border:2px solid #8a8a8a;background:var(--card);font:700 30px system-ui;cursor:pointer}
 .setrow{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:8px 0}.lbl{font-size:13px;color:var(--mut);margin-bottom:4px}
-.wslot.review{border:3px solid #c80;background:#fff0bd}.c.review{color:var(--ink);border:3px solid #c80;background:#fff0bd;opacity:1}.c.review::before{content:"!";position:absolute;top:0;right:3px;font-size:12px}.c small{position:absolute;top:2px;left:4px;font-size:10px;font-weight:500}#photoView[hidden]{display:none!important}
+.wslot.review,.chip.review{border:3px solid #c80;background:#fff0bd}.c.review{color:var(--ink);border:3px solid #c80;background:#fff0bd;opacity:1}.c.review::before{content:"!";position:absolute;top:0;right:3px;font-size:12px}.c small{position:absolute;top:2px;left:4px;font-size:10px;font-weight:500}#photoView[hidden]{display:none!important}
 details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace,monospace;padding:8px;border-radius:8px;border:1px solid #bbb}
 #sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:10}
 #sheet.open{display:flex}#sheet .in{background:#fff;width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
 #sheet h2{margin:0 0 10px;font-size:18px}.keys{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.keys button{font:700 22px system-ui;padding:16px 0;border-radius:12px;border:0;background:#eee;min-height:56px;cursor:pointer}
 @media (min-width:600px){#sheet{align-items:center}#sheet .in{border-radius:18px}.keys{grid-template-columns:repeat(7,1fr)}}
-.seg{display:flex;gap:6px;margin:6px 0}.seg button{flex:1;font:600 15px system-ui;padding:10px;border-radius:10px;border:2px solid #d8d4c8;background:#fff;cursor:pointer}.seg button.on{border-color:var(--pri);background:#fff1e8}.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.chip{min-width:38px;height:46px;border-radius:8px;border:1.5px solid #8a8a8a;background:var(--card);font:700 18px system-ui;cursor:pointer}ol.steps{padding-left:22px;margin:8px 0;max-height:220px;overflow:auto;font-size:15px}ol.steps li{padding:2px 0}ol.steps li.cur{font-weight:700;color:var(--blue)}.warn{background:#fff6e0;border-left:6px solid #e0a000;border-radius:8px;padding:10px 12px;font-size:15px}
+.seg{display:flex;gap:6px;margin:6px 0}.seg button{flex:1;font:600 15px system-ui;padding:10px;border-radius:10px;border:2px solid #d8d4c8;background:#fff;cursor:pointer}.seg button.on{border-color:var(--pri);background:#fff1e8}.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.chip{min-width:48px;min-height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid #8a8a8a;background:var(--card);font:700 18px system-ui;cursor:pointer}.chip small{font-size:10px;font-weight:500;color:var(--mut)}ol.steps{padding-left:22px;margin:8px 0;max-height:220px;overflow:auto;font-size:15px}ol.steps li{padding:2px 0}ol.steps li.cur{font-weight:700;color:var(--blue)}.warn{background:#fff6e0;border-left:6px solid #e0a000;border-radius:8px;padding:10px 12px;font-size:15px}
 .log{font-size:13px;color:var(--mut);white-space:pre-wrap}
 </style></head><body><main>
 <h1>TriTowers solver</h1><p class="sub">Rank-only. Percentages are estimates, never proofs.</p>
@@ -38,15 +38,15 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
  <div class="seg" role="group" aria-label="Mode"><button type="button" id="modePlay" class="on">Play along (cards hidden)</button><button type="button" id="modeDeal">I know the whole deal</button></div>
  <p class="sub" id="modeHelp">Cards covered on the table stay hidden; I will ask for each one as it is uncovered.</p>
  <div class="panel"><div class="lbl">1. Read from a photo (optional)</div>
-  <div class="row"><button class="b" id="photoBtn" type="button">Choose photo of the machine screen</button></div><input id="photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" hidden>
+  <div class="row"><button class="b" id="photoBtn" type="button">Choose photo of the towers or all-cards grid</button></div><input id="photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" hidden>
   <div id="photoNote" role="status" aria-live="polite" class="sub" style="margin-top:8px"></div>
   <img id="photoView" alt="What the photo reader saw: green read, yellow check, red covered, grey empty" hidden style="display:block;width:100%;margin-top:8px;border-radius:6px"></div>
  <div class="panel"><div class="lbl">2. Cards on the table (tap a card to set it; red = covered; yellow = check)</div>
   <div class="tw"><div class="towers" id="editBoard"></div></div>
-  <p class="sub">Check the picture and board together. Tap any card to correct it. Covered ranks and stock order stay unknown; set the stock counter below.</p>
+  <p class="sub" id="boardHelp">Check the picture and board together. Tap any card to correct it. Covered ranks and stock order stay unknown; set the stock counter below.</p>
   <div class="setrow"><div><div class="lbl">Waste card (required)</div><button class="wslot" id="wasteBtn" type="button">?</button></div>
    <div><div class="lbl">Stock cards left <small>(count the joker too: a fresh stock is 24, the joker is always the last card)</small></div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">24</output><button class="b" id="stP" type="button" aria-label="more">+</button></div><label style="display:block;margin-top:6px;font-size:14px"><input type="checkbox" id="jk" checked> This machine has a joker</label></div></div>
-  <div id="stockOrder" hidden><div class="lbl">Stock order, next card drawn first (<span id="soN">0</span> entered; must match the stock count above)</div><div class="chips" id="soChips"></div><div class="row"><button class="b" id="soAdd" type="button">Add cards</button><button class="b" id="soClear" type="button">Clear stock</button></div></div>
+  <div id="stockOrder" hidden><p class="sub" id="gridMapping" hidden>Grid cards are arranged into table positions 1–28 and the waste. Stock is entered from right to left on the photo, with the joker last. Check this order before solving.</p><div class="lbl">Stock order, next card drawn first (<span id="soN">0</span> entered; must match the stock count above)</div><div class="chips" id="soChips"></div><div class="row"><button class="b" id="soAdd" type="button">Add cards</button><button class="b" id="soClear" type="button">Clear stock</button></div></div>
   <details><summary>Paste the board as text</summary><p class="sub">28 entries, positions 1-28. A 2-10 J Q K, ? = face-down, -- = empty.</p><textarea id="paste" rows="3"></textarea><button class="b" id="pasteBtn" type="button" style="margin-top:6px">Use this text</button></details>
  </div>
  <div id="deckWarn" role="alert" hidden></div>
@@ -81,7 +81,7 @@ const $=id=>document.getElementById(id);
 let sid=sessionStorage.getItem("tt_sid"),busy=false,geo=null,aspect=1.9,S=null,setup={board:Array(28).fill("?"),waste:"",stock:24,joker:true,order:[],deal:false},SOL=null,step=0;
 function msg(t,cls){const m=$("msg");m.textContent=t||"";m.className=cls||""}
 function rid(){return (crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now())}
-let photoGeneration=0,photoAbort=null,photoDraft=false,photoReview=new Set(),photoStates={};
+let photoGeneration=0,photoAbort=null,photoDraft=false,photoMode=null,photoReview=new Set(),photoStates={};
 const escapeHTML=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function editedPhoto(slot){photoGeneration++;if(photoAbort)photoAbort.abort();if(slot)photoReview.delete(String(slot));}
 const RETRY_MS=100000;   // keep retrying a failed request this long (the host's tunnel watchdog bounds outages at ~50 s)
@@ -108,7 +108,7 @@ function boardHTML(cells,mode){
   return cells.map(c=>{
     let cls=c.kind,txt=c.card;
     if(mode==="edit"){cls=c.card==="?"?"back":c.card==="--"?"gone":"up";cls+=" edit";txt=c.card==="--"?"":(c.card==="?"?"":c.card)}
-    if(mode==="edit"&&photoReview.has(String(c.p))){cls+=" review";if(c.card==="?")txt="?"}
+    if(mode==="edit"&&(photoReview.has(String(c.p))||(setup.deal&&c.card==="?"))){cls+=" review";if(c.card==="?")txt="?"}
     else{if(c.kind==="back"||c.kind==="gone")txt="";if(c.kind==="ask")txt="?"}
     if(mode==="play"&&S&&S.advice&&S.advice.pos===c.p)cls+=" rec";
     const label=mode==="edit"?`Position ${c.p}`:`Position ${c.p} ${c.card||""} ${c.kind}`;
@@ -118,7 +118,7 @@ function sized(el){el.parentElement.style.aspectRatio=aspect;el.style.aspectRati
 function deckProblems(){const n={};const add=c=>{if(RANKS.includes(c))n[c]=(n[c]||0)+1};setup.board.forEach(add);add(setup.waste);if(setup.deal)setup.order.forEach(add);
   const bad=RANKS.filter(r=>n[r]>4).map(r=>r+" x"+n[r]);return bad.length?"Impossible deck: a deck has only four of each rank, but this board has "+bad.join(", ")+". Fix the board before starting.":""}
 function showDeck(){const w=$("deckWarn");if(!w)return "";const t=deckProblems();w.textContent=t;w.hidden=!t;return t}
-function drawEdit(){if(!geo)return;const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("wasteBtn").classList.toggle("review",photoReview.has("waste"));$("stV").textContent=setup.stock;showDeck()}
+function drawEdit(){if(!geo)return;const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("wasteBtn").classList.toggle("review",photoReview.has("waste")||(setup.deal&&!setup.waste));$("stV").textContent=setup.stock;showDeck()}
 function draw(){
   $("setup").hidden=true;$("play").hidden=false;
   $("board").innerHTML=boardHTML(S.cells,"play");sized($("board"));
@@ -162,17 +162,17 @@ let pollT=null,pollGen=0;function poll(){clearTimeout(pollT);const gen=++pollGen
 $("recBtn").onclick=()=>act("recommend",{sims:1200},{timeout:70000});
 $("drawBtn").onclick=()=>{if(S&&S.joker&&S.stock===1){act("draw",{rank:"*"});return}keypad("Which card did you draw?",[],k=>act("draw",{rank:k}))};
 $("undoBtn").onclick=()=>act("undo",{});
-$("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){editedPhoto();gameGeneration++;pollGen++;clearTimeout(pollT);busy=false;sessionStorage.removeItem("tt_sid");sid=null;S=null;photoDraft=false;$("startBtn").textContent="Start game";$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
+$("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){editedPhoto();gameGeneration++;pollGen++;clearTimeout(pollT);busy=false;sessionStorage.removeItem("tt_sid");sid=null;S=null;photoDraft=false;photoMode=null;$("startBtn").textContent="Start game";$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
 $("editBoard").onclick=e=>{const b=e.target.closest(".c");if(!b)return;const p=+b.dataset.p;keypad("Set position "+p,["?","--"],k=>{editedPhoto(p);setup.board[p-1]=k;drawEdit()})};
 $("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{editedPhoto("waste");setup.waste=k;drawEdit()});
 $("jk").onchange=()=>{editedPhoto();setup.joker=$("jk").checked;if(!setup.joker&&setup.stock>23)setup.stock=23;if(setup.joker&&setup.stock===23)setup.stock=24;drawEdit()};
 $("stM").onclick=()=>{editedPhoto();setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{editedPhoto();setup.stock=Math.min(setup.joker?24:23,setup.stock+1);drawEdit()};
-$("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}const tokens=t.map(x=>x.toUpperCase());if(tokens.some(x=>![...RANKS,"?","--"].includes(x))){msg("Use only A, 2–10, J, Q, K, ? or --.","err");return}editedPhoto();photoReview.clear();setup.board=tokens;drawEdit();msg("Board set from text.")};
+$("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}const tokens=t.map(x=>x.toUpperCase());if(tokens.some(x=>![...RANKS,"?","--"].includes(x))){msg("Use only A, 2–10, J, Q, K, ? or --.","err");return}editedPhoto();photoReview=new Set([...photoReview].filter(k=>!/^\d+$/.test(k)));setup.board=tokens;drawEdit();msg("Board set from text.")};
 $("photoBtn").onclick=()=>$("photo").click();
 $("photo").onchange=async()=>{
   const f=$("photo").files[0];$("photo").value="";if(!f)return;
   const generation=++photoGeneration;if(photoAbort)photoAbort.abort();photoAbort=new AbortController();
-  const started=performance.now();msg("Preparing photo…");$("photoNote").textContent="";$("photoView").hidden=true;
+  const started=performance.now();msg("Preparing photo…");
   try{
     const normalized=await TTPhoto.normalize(f,{signal:photoAbort.signal});
     if(generation!==photoGeneration)return;
@@ -181,12 +181,18 @@ $("photo").onchange=async()=>{
     if(generation!==photoGeneration)return;
     if(!r.ok){msg(r.message||"Could not read that photo.","err");return}
     if(!Array.isArray(r.board)||r.board.length!==28||r.board.some(t=>![...RANKS,"?","--"].includes(t)))throw new Error("invalid_draft");
-    setup.board=r.board;setup.waste=RANKS.includes(r.waste)?r.waste:"";
-    photoDraft=true;photoReview=new Set((r.review||[]).map(String));photoStates=r.states||{};
-    setMode(false,true);drawEdit();$("startBtn").textContent="Confirm board & start";
+    const fullDeal=r.mode==="full_deal";
+    if(fullDeal&&(!Array.isArray(r.stock)||r.stock.length!==24||r.stock_count!==24||r.stock[23]!=="*"||r.stock.slice(0,-1).some(t=>![...RANKS,"?"].includes(t))))throw new Error("invalid_stock_draft");
+    setup.board=[...r.board];setup.waste=RANKS.includes(r.waste)?r.waste:"";
+    setup.order=fullDeal?[...r.stock]:[];
+    if(fullDeal){setup.stock=r.stock_count;setup.joker=true;$("jk").checked=true}
+    photoDraft=true;photoMode=fullDeal?"full_deal":"tableau";photoReview=new Set((r.review||[]).map(String));photoStates=r.states||{};
+    if(fullDeal){setup.board.forEach((rank,i)=>{if(rank==="?")photoReview.add(String(i+1))});if(!setup.waste)photoReview.add("waste");setup.order.forEach((rank,i)=>{if(rank==="?")photoReview.add("stock-"+(i+1))})}
+    setMode(fullDeal,true);drawEdit();$("startBtn").textContent="Confirm board & start";
     $("photoNote").textContent=`Read in ${((performance.now()-started)/1000).toFixed(1)} s. ${r.note||"Check the board, waste and stock counter."}`;
+    $("photoView").hidden=true;
     if(typeof r.overlay==="string"&&r.overlay.startsWith("data:image/jpeg;base64,")){$("photoView").src=r.overlay;$("photoView").hidden=false}
-    msg(r.trusted?"Board ready. Check the picture, correct any yellow cards, and confirm below.":"Layout uncertain. Check every position against the picture, or try a straighter photo.",r.trusted?"":"err");
+    msg(r.trusted?(fullDeal?"Whole deal ready to check. Correct any yellow cards, check the stock order, and confirm below.":"Board ready. Check the picture, correct any yellow cards, and confirm below."):"Layout uncertain. Check every position against the picture, or try a straighter photo.",r.trusted?"":"err");
   }catch(e){if(generation===photoGeneration&&e.name!=="AbortError")msg(e.userMessage||"Could not read this photo. Choose a JPEG, PNG, WebP or HEIC image and try again.","err")}
 };
 $("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
@@ -205,11 +211,15 @@ $("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp
 function setMode(deal,fromPhoto=false){if(!fromPhoto)editedPhoto();setup.deal=deal;$("modePlay").classList.toggle("on",!deal);$("modeDeal").classList.toggle("on",deal);
   $("startBtn").hidden=deal;$("solveBtn").hidden=!deal;$("stockOrder").hidden=!deal;
   $("modeHelp").textContent=deal?"Every card must be known: the 28 table cards, the waste and the whole stock in order. I will not guess missing cards.":"Cards covered on the table stay hidden; I will ask for each one as it is uncovered.";
-  drawStock()}
-function drawStock(){showDeck();$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip" data-i="${i}" aria-label="Stock card ${i+1}">${escapeHTML(c)}</button>`).join("")}
+  $("boardHelp").textContent=deal?"Check every rank against the picture. Tap a card to correct it; fill in any ? before solving.":"Check the picture and board together. Tap any card to correct it. Covered ranks and stock order stay unknown; set the stock counter below.";
+  $("gridMapping").hidden=!deal||photoMode!=="full_deal";
+  $("solveBtn").textContent=photoDraft?"Confirm deal & solve":"Solve this deal";
+  drawEdit();drawStock()}
+function drawStock(){showDeck();$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip${photoReview.has("stock-"+(i+1))||c==="?"?" review":""}" data-i="${i}" aria-label="Stock card ${i+1}${c==="?"?", unknown":""}"><small>${i+1}${i===0?" · next":""}</small><span>${escapeHTML(c)}</span></button>`).join("")}
+function removeStockReview(index){photoReview=new Set([...photoReview].flatMap(k=>{if(!k.startsWith("stock-"))return [k];const n=+k.slice(6);return n===index+1?[]:["stock-"+(n>index+1?n-1:n)]}))}
 $("modePlay").onclick=()=>setMode(false);$("modeDeal").onclick=()=>setMode(true);
-$("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1),["remove","*"],k=>{editedPhoto();if(k==="remove")setup.order.splice(i,1);else setup.order[i]=k;drawStock()})};
-$("soClear").onclick=()=>{editedPhoto();setup.order=[];drawStock()};
+$("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1)+(i===0?" (next drawn)":""),["?","remove","*"],k=>{editedPhoto("stock-"+(i+1));if(k==="remove"){setup.order.splice(i,1);removeStockReview(i)}else setup.order[i]=k;drawStock()})};
+$("soClear").onclick=()=>{editedPhoto();setup.order=[];photoReview=new Set([...photoReview].filter(k=>!k.startsWith("stock-")));drawStock()};
 function addMany(){keypad("Next stock card ("+setup.order.length+" so far). Use * for the joker: it is always the last stock card.",["*"],k=>{editedPhoto();setup.order.push(k);drawStock();if(k!=="*"&&setup.order.length<24)setTimeout(addMany,0)})}
 $("soAdd").onclick=addMany;
 function showStep(){const f=SOL.frames[step];$("solN").textContent=step;$("solT").textContent=SOL.steps.length;$("solW").textContent=f.waste;$("solS").textContent=f.stock;
@@ -219,7 +229,15 @@ function showStep(){const f=SOL.frames[step];$("solN").textContent=step;$("solT"
   $("solPrev").disabled=step===0;$("solNext").disabled=step>=SOL.steps.length;$("solNext").textContent=step>=SOL.steps.length-1?(step>=SOL.steps.length?"Done":"Last step"):"Next step"}
 $("solPrev").onclick=()=>{if(step>0){step--;showStep()}};$("solNext").onclick=()=>{if(step<SOL.steps.length){step++;showStep()}};
 $("solEdit").onclick=()=>{$("solved").hidden=true;$("setup").hidden=false;msg("")};
-$("solveBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}editedPhoto();busy=true;msg("Solving… this can take up to 10 seconds.");$("solveBtn").disabled=true;
+function incompleteDeal(){
+  const missing=[];const board=setup.board.flatMap((rank,i)=>rank==="?"?[i+1]:[]);const stock=setup.order.flatMap((rank,i)=>rank==="?"?[i+1]:[]);
+  if(board.length)missing.push("table positions "+board.join(", "));
+  if(!RANKS.includes(setup.waste))missing.push("the waste card");
+  if(stock.length)missing.push("stock cards "+stock.join(", "));
+  if(setup.order.length!==setup.stock)missing.push("the stock order ("+setup.order.length+" entered; expected "+setup.stock+")");
+  return missing.length?"The deal is not complete. Fill in "+missing.join("; ")+" before solving. I will not guess missing cards.":"";
+}
+$("solveBtn").onclick=async()=>{if(busy)return;const dp=showDeck()||incompleteDeal();if(dp){msg(dp,"err");return}editedPhoto();busy=true;msg("Solving… this can take up to 10 seconds.");$("solveBtn").disabled=true;
   try{const r=await post("/api/solve",{board:setup.board.join(" "),waste:setup.waste,stock:setup.order,stock_count:setup.stock},{timeout:60000});
     $("setup").hidden=true;$("solved").hidden=false;$("solBanner").textContent=r.message||"";$("solBody").hidden=true;msg("");
     if(r.ok&&r.status==="solved"){SOL=r;step=0;$("solBody").hidden=false;$("solBanner").className="adv";showStep()}else{$("solBanner").className="warn"}}

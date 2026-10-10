@@ -102,10 +102,10 @@ def test_complete_deal_mode_never_guesses(server, browser, vp):
     page.on("pageerror", lambda e: errs.append(str(e)))
     page.goto(server); page.wait_for_selector("#editBoard .c")
     page.click("#modeDeal"); assert page.is_visible("#solveBtn") and not page.is_visible("#startBtn")
-    page.click("#solveBtn"); page.wait_for_selector("#solBanner")
-    page.wait_for_function("document.getElementById('solBanner').textContent.includes('not complete')", timeout=15000)
-    assert "will not guess" in page.inner_text("#solBanner") and not page.is_visible("#solBody")
-    page.click("#solEdit"); page.click("#soAdd"); page.click('#keys button[data-k="7"]')
+    page.click("#solveBtn"); page.wait_for_selector("#msg.err")
+    assert "not complete" in page.inner_text("#msg") and "will not guess" in page.inner_text("#msg")
+    assert page.is_visible("#setup") and not page.is_visible("#solved")
+    page.click("#soAdd"); page.click('#keys button[data-k="7"]')
     assert page.locator("#soChips .chip").count() == 1 and not errs
     page.close()
 
