@@ -12,7 +12,7 @@ These are small development checks, not a general recognition accuracy claim. Al
 
 - Nine local tableau images: five JPEGs including mid-game and empty-stock states, plus four actual iPhone HEICs. All 28 slot states match the local labels on all nine. No wrong named rank was observed. Per-image results stay in ignored `local/`.
 - Four local full-draw-screen HEICs were rejected as unsupported tableau geometry.
-- A separate 18-scene generated evaluation (three skins; screenshot, crop and perspective capture; fixed evaluation seed) produced 69.8% correct visible names and 30.2% abstentions, with no wrong named ranks or silent errors. This is synthetic validation, not an independent machine session.
+- A separate 18-scene generated evaluation (three skins; screenshot, crop and perspective capture; fixed evaluation seed) produced 70.5% correct visible names and 29.5% abstentions, with no wrong named ranks or silent errors. This is synthetic validation, not an independent machine session.
 - Public regressions cover single-card and empty scenes, absent stock, a sparse board with an animation banner, rotation/scale, lighting/crop extraction errors, negatives, font-score equivalence and the missed-last-card veto.
 - All eight EXIF orientations, 48 MP JPEG normalization, invalid/unsupported input and actual local JPEG/HEIC decoding were exercised. Browser tests cover repeated selections, failed decode, bitmap fallback, stale responses and correction/confirmation.
 
@@ -34,7 +34,7 @@ Desktop Chromium, 390px viewport, CDP 4× CPU-throttling setting, with runtime f
 
 ## Automated checks
 
-Final local discovery: 398 non-browser tests passed, plus seven unittest subtests. Two legacy font-specific tests explicitly skipped on macOS; CI installs the fonts and requires them. The private iPhone intake test was enabled locally. Browser validation includes the existing mobile/desktop flow, a 40-second outage, photo races/corrections and actual Pyodide/HEIC decoding.
+Final local discovery: 398 non-browser tests passed, plus seven unittest subtests. Two legacy font-specific tests explicitly skipped on macOS; CI installs the fonts and requires them. The private iPhone intake test was enabled locally. All 18 browser tests passed; one optional private-template fixture skipped. Browser validation includes the existing mobile/desktop flow, a 40-second outage, photo races/corrections and actual Pyodide/HEIC decoding.
 
 ## Reproduce
 
