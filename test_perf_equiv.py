@@ -60,6 +60,7 @@ class PerformanceRefactorEquivalence(unittest.TestCase):
         rec = solver.best_move(solver.Game(board, "K", False, 23), 300, random.Random(1))
         self.assertEqual(rec.position, 20)
         self.assertAlmostEqual(rec.success_rate, 0.21333333333333335)
+        self.assertEqual(rec.simulations, 300)
 
     def test_layout_constants_account_for_deck(self):
         self.assertEqual(

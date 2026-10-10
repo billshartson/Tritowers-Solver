@@ -1,3 +1,5 @@
+import os
+import pytest
 import numpy as np
 from PIL import Image
 from tritowers_vision.layout import tableau_boxes
@@ -17,7 +19,9 @@ def test_robust_matcher_tolerates_shift_and_abstains_on_noise():
     import cv2
     from tritowers_vision import rank as R
     syn = dict(R.synthetic_templates())
-    if not syn: return          # open font not installed here: robust matcher degrades to photo templates only
+    if not syn:
+        if os.environ.get("TT_REQUIRE_TEST_FONTS"): pytest.fail("Install fonts-liberation for legacy matcher coverage")
+        pytest.skip("Legacy matcher needs an installed Liberation font")
     for r in ("A", "7", "Q", "10"):
         g = cv2.warpAffine(syn[r], np.float32([[1, 0, 1], [0, 1, -1]]), (24, 32))
         assert R.match_robust(g, [])[0] == r

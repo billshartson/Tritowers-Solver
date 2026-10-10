@@ -27,14 +27,14 @@ class CliTests(unittest.TestCase):
 
     def test_undo_returns_independent_prior_state(self):
         board = ["--"] * solver.TOTAL_TABLEAU
-        board[18] = "2"
+        board[0] = "2"
         game = solver.Game(board, "A", False, 0)
         history = cli.UndoHistory()
         history.checkpoint(game)
-        game.play(19)
+        game.play(1)
         restored = history.undo()
         self.assertEqual(restored.waste, "A")
-        self.assertNotIn(19, restored.removed)
+        self.assertNotIn(1, restored.removed)
 
     def test_eof_is_clean_stop(self):
         def eof(_):
@@ -44,7 +44,7 @@ class CliTests(unittest.TestCase):
 
     def test_commands_are_distinct_from_card_ranks(self):
         self.assertEqual(cli.read_rank_or_command("> ", input_fn=lambda _: "undo"), "UNDO")
-        self.assertEqual(cli.read_rank_or_command("> ", input_fn=lambda _: "q"), "QUIT")
+        self.assertEqual(cli.read_rank_or_command("> ", input_fn=lambda _: "q"), "Q")
         self.assertEqual(cli.read_rank_or_command("> ", input_fn=lambda _: "a"), "A")
 
 

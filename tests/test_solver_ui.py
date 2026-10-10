@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.environ.get("TT_SOLVER_DIR", "."))
 import pytest
-solver = pytest.importorskip("solver")
+import solver
 import solver_ui as ui
 BOARD = "? "*18 + "2 A 3 7 9 J 5 3 9 3"
 def test_flow():
@@ -48,7 +48,7 @@ def test_recommend_passes_time_budget(monkeypatch):
     seen = {}
     def fake(game, **kw): seen.update(kw); return None
     monkeypatch.setattr(solver, "best_move", fake)
-    ui.recommend(ui.new_session(BOARD, "K", 23), 50, 1)
+    ui.recommend(ui.new_session(BOARD, "K", 23), 50)
     assert seen["time_budget"] == ui.RECOMMEND_TIME_BUDGET
 def test_three_tower_geometry():
     h = ui.render_board(ui.new_session(BOARD, "K", 23))
@@ -101,7 +101,7 @@ def test_cli_draw_takes_joker_without_asking():
     assert g.waste == "*" and "joker" in out[0]
 
 def test_sampled_rollout_draws_the_joker_last_and_wins_on_it():
-    g = Game(["--"] * 27 + ["K"], "5", False, 1, joker_in_stock=True)   # K cannot play on 5; the only draw is the joker, K plays on it
+    g = Game(["K"] + ["--"] * 27, "5", False, 1, joker_in_stock=True)   # K cannot play on 5; the only draw is the joker, K plays on it
     assert solver.simulate(g, rng=_random.Random(0)) is True
 
 def test_cli_flag_and_setup_count():

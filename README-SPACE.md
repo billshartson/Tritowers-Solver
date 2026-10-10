@@ -3,14 +3,15 @@ title: TriTowers Solver
 emoji: 🃏
 colorFrom: green
 colorTo: gray
-sdk: gradio
-sdk_version: 6.28.0
-python_version: "3.10"
-app_file: app.py
+sdk: docker
+app_port: 7860
 suggested_hardware: cpu-basic
 pinned: false
 ---
 # TriTowers Solver
+
+The mobile web app opens at `/`; the alternate Gradio UI is at `/gradio`.
+Both share the same solver and photo reader.
 
 A rank-only Tri Towers move helper with manual board entry and an optional photo
 reader. Enter the 28 tableau positions, waste rank and number of stock cards left,
@@ -18,7 +19,8 @@ then start a game. Green cards are playable; yellow question marks need a rank
 before a recommendation. Enter the position you played, newly revealed ranks or
 the card drawn from stock. Undo restores the previous game state.
 
-The UI accepts an unknown stock count, not a known stock order. UI undo restores
+Play-along accepts an unknown stock count. Known-deal mode accepts the remaining
+stock order and every remaining tableau rank, then verifies any returned line. UI undo restores
 game state only, not sampling history. Sampled win percentages are estimates, not
 proofs. A proven recommendation is separately labelled. The stock count is the
 engine count; translating a quiz-machine HUD count has not been verified.
@@ -35,8 +37,9 @@ Suits and stock counters are not read.
 
 ## Runtime
 
-This file must be the Space's root `README.md`. The runtime entrypoint is `app.py`;
-root `requirements.txt` pins Gradio 6.28.0 and the image dependencies. The solver
+This file must be the Space's root `README.md`. Docker starts `app.py` on
+`0.0.0.0:7860`, serving `/`, `/api/*`, `/health` and `/gradio`. Root
+`requirements.txt` pins Gradio, FastAPI, uvicorn, multipart and image dependencies. The solver
 runs on CPU. `suggested_hardware` is a suggestion, not a hardware purchase.
 
 The deployment owner must create or select a **private** Space before uploading.

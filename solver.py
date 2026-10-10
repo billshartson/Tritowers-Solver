@@ -52,7 +52,8 @@ SOLVER BEHAVIOUR
 5. If only the bottom row is known, upper cards are requested
    ONLY when they become exposed.
 
-6. The solver looks for a guaranteed route first.
+6. With every card and stock order known, the solver searches
+   for a verified winning line first, within a search limit.
 
 7. If no guaranteed route is available, it chooses the route
    with the highest estimated probability of success.
@@ -66,10 +67,15 @@ SOLVER BEHAVIOUR
 """
 
 import random
+import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
+
+# CLI helpers import solver too; script execution must use the same classes.
+if __name__ == "__main__":
+    sys.modules["solver"] = sys.modules[__name__]
 
 
 # ======================================================================
@@ -239,6 +245,8 @@ def normalize(card):
     Convert input to a valid rank.
     """
 
+    if not isinstance(card, str):
+        raise ValueError("Choose a card rank: A, 2-10, J, Q or K.")
     card = card.strip().upper()
 
     if card in ("?", "--"):
@@ -299,6 +307,9 @@ def validate_deal(board, waste, stock_known, stock):
     represented by a nonnegative count; known stock remains ordered.
     """
     board = validate_board(board)
+    cleared = {p for p, card in enumerate(board, 1) if card == "--"}
+    if any(not set(BLOCKERS.get(p, ())) <= cleared for p in cleared):
+        raise ValueError("A cleared tableau card is still covered by a present card.")
     waste = JOKER if isinstance(waste, str) and waste.strip() == JOKER else normalize(waste)
     if waste not in RANKS and waste != JOKER:
         raise ValueError("Waste must have a known rank.")
@@ -322,9 +333,13 @@ def validate_deal(board, waste, stock_known, stock):
         if jokers > 1:
             raise ValueError("Only one joker exists.")
         stock = normalized_stock
+        if len(stock) - int(bool(stock) and stock[-1] == JOKER) > TOTAL_STOCK:
+            raise ValueError(f"Stock cannot contain more than {TOTAL_STOCK} ranked cards.")
     else:
         if isinstance(stock, bool) or not isinstance(stock, int) or stock < 0:
             raise ValueError("Unknown stock must be a nonnegative card count.")
+        if stock > TOTAL_STOCK:
+            raise ValueError(f"Unknown stock cannot exceed {TOTAL_STOCK} ranked cards.")
 
     counts = Counter(card for card in board if card in RANKS)
     if waste in RANKS:
@@ -695,7 +710,7 @@ class UndoRequested(Exception):
 
 
 def read_rank_undoable(prompt):
-    """Like read_rank, but 'undo' or 'u' goes back one step."""
+    """Like read_rank, but 'undo' or 'u' returns to the previous input prompt."""
 
     while True:
 
@@ -717,7 +732,7 @@ def read_rank_undoable(prompt):
         return card
 
 
-CORRECTION_HELP = "fix <pos> <rank> / waste <rank> / stock <n> <rank>"
+CORRECTION_HELP = "fix <pos> <rank> / waste <rank> / stock <count> (unknown stock) / stock <n> <rank>"
 
 
 def apply_correction(line, board, waste, stock, stock_known):
@@ -743,6 +758,8 @@ def apply_correction(line, board, waste, stock, stock_known):
         if not 1 <= index <= len(stock):
             raise ValueError(f"stock index must be 1-{len(stock)}")
         stock[index - 1] = normalize(line[2])
+    elif command == "stock" and len(line) == 2 and not stock_known:
+        stock = int(line[1])
     else:
         raise ValueError("unrecognised correction")
 
@@ -758,11 +775,13 @@ def overfull_report(board, waste, stock_known, stock):
         if card in RANKS:
             places.setdefault(card, []).append(f"position {position:02d}")
 
-    places.setdefault(waste, []).append("waste")
+    if waste in RANKS:
+        places.setdefault(waste, []).append("waste")
 
     if stock_known:
         for index, card in enumerate(stock, start=1):
-            places.setdefault(card, []).append(f"stock {index}")
+            if card in RANKS:
+                places.setdefault(card, []).append(f"stock {index}")
 
     return [
         f"{rank} was entered {len(where)} times (a deck has "
@@ -817,6 +836,7 @@ def review_setup(game, read_line=input, emit=print):
         fix <position> <rank>   e.g. fix 07 K   (also -- for cleared, ? for unknown)
         waste <rank>
         stock <index> <rank>    known stock only, 1 = next card drawn
+        stock <count>           unknown stock only, remaining card count
     Returns the (possibly corrected) game. A rejected correction leaves the
     game unchanged.
     """
@@ -829,6 +849,8 @@ def review_setup(game, read_line=input, emit=print):
         emit(tritowers_cli.format_board(game))
         if game.stock_known:
             emit("Stock order: " + " ".join(game.stock))
+        else:
+            emit("To correct the remaining stock count, enter stock <count>.")
 
         try:
             line = read_line(
@@ -852,17 +874,17 @@ def review_setup(game, read_line=input, emit=print):
 
 
 def checkpoint(history, game, rng):
-    """Save the game and the sampler state so undo erases a step completely."""
+    """Save the game and sampler immediately before a user input prompt."""
 
     history.checkpoint(game)
     history._states[-1].rng_state = rng.getstate()
 
 
 def rewind(history, rng=None):
-    """Return the game to the start of the previous step.
+    """Return the game to the previous input prompt, crossing automatic moves.
 
-    The newest checkpoint is the start of the step that is in progress, so it
-    is discarded. With no earlier step, the current step simply restarts.
+    The newest checkpoint is the prompt in progress and is discarded. With
+    no earlier input prompt, the current prompt simply restarts.
     """
 
     current = history.undo()
@@ -954,8 +976,10 @@ exposed.
 GUARANTEED ROUTE
 ----------------
 
-The solver first searches for a route that is guaranteed
-to work based on the information currently available.
+When every remaining tableau card and the stock order are
+known, the solver first searches for a verified winning line.
+Search limits can leave the result undecided. With hidden
+cards, only an immediate tableau clear is labelled guaranteed.
 
 
 STATISTICAL ROUTE
@@ -1032,6 +1056,26 @@ def read_stock_count(read_line=None, emit=print, joker=False):
         emit(f"Please enter a whole number from 0 to {top}.")
 
 
+def read_stock_cards(read_line=None, emit=print, joker=False):
+    """Read the remaining ordered stock, including an optional fixed joker tail."""
+    read_line = read_line or input
+    while True:
+        try:
+            cards = [JOKER if token == JOKER else normalize(token)
+                     for token in read_line("> ").split()]
+            if joker and JOKER not in cards:
+                cards.append(JOKER)
+            if any(card not in RANKS and card != JOKER for card in cards):
+                raise ValueError("Enter known ranks only; an empty line means no stock remains.")
+            if JOKER in cards and (cards[-1] != JOKER or cards.count(JOKER) != 1):
+                raise ValueError("The joker must be the last stock card.")
+            if len(cards) - int(bool(cards) and cards[-1] == JOKER) > TOTAL_STOCK:
+                raise ValueError(f"Enter at most {TOTAL_STOCK} ranked stock cards.")
+            return cards
+        except ValueError as error:
+            emit(str(error))
+
+
 def setup(skip_tutorial=False, joker=False):
 
     if not skip_tutorial:
@@ -1075,7 +1119,7 @@ def setup(skip_tutorial=False, joker=False):
     print()
 
     print(
-        "Do you know the order of the 23 stock cards?"
+        "Do you know the order of the remaining stock cards?"
     )
 
     print(
@@ -1170,19 +1214,16 @@ Enter all 10 cards on ONE line.
 
         print(
             """
-Enter the 23 stock cards in DRAW ORDER.
+Enter the remaining stock cards in DRAW ORDER (up to 23 ranks).
 
 The FIRST card you enter is the NEXT card that
 will be drawn.
 
-Enter all 23 cards on ONE line.
+Enter them on ONE line, or leave it empty if the stock is empty.
 """
         )
 
-        stock = read_cards(
-            "> ",
-            TOTAL_STOCK
-        )
+        stock = read_stock_cards(joker=joker)
 
         stock_known = True
 
@@ -1209,7 +1250,7 @@ Enter all 23 cards on ONE line.
 # REVEAL UNKNOWN CARDS
 # ======================================================================
 
-def reveal_unknowns(game, read_card=read_rank):
+def reveal_unknowns(game, read_card=read_rank, emit=print, before_prompt=None):
 
     """
     Ask for every newly exposed unknown tableau card.
@@ -1225,18 +1266,24 @@ def reveal_unknowns(game, read_card=read_rank):
     ]
 
     for position in unknown_positions:
-
-        card = read_card(f"Position {position:02d}: ")
-
-        card = game.observe_rank(card)
-        game.board[position - 1] = card
+        if before_prompt is not None:
+            before_prompt()
+        while True:
+            card = read_card(f"Position {position:02d}: ")
+            try:
+                card = game.observe_rank(card)
+            except ValueError as error:
+                emit(str(error) + " Please try again, or type undo.")
+                continue
+            game.board[position - 1] = card
+            break
 
 
 # ======================================================================
 # STOCK DRAW
 # ======================================================================
 
-def draw(game, read_card=read_rank, emit=print):
+def draw(game, read_card=read_rank, emit=print, before_prompt=None):
 
     # ------------------------------------------------------------------
     # KNOWN STOCK
@@ -1269,9 +1316,15 @@ def draw(game, read_card=read_rank, emit=print):
         return True
 
     # The user only tells us what card actually appeared.
-    card = read_card("DRAW -> ")
-
-    game.observe_draw(card)
+    if before_prompt is not None:
+        before_prompt()
+    while True:
+        card = read_card("DRAW -> ")
+        try:
+            game.observe_draw(card)
+            break
+        except ValueError as error:
+            emit(str(error) + " Please try again, or type undo.")
 
     return True
 
@@ -1528,13 +1581,16 @@ def best_move(game, simulations=SIMULATIONS, rng=None, time_budget=None):
 
     A sampled rate of 100% remains sampled evidence, never a proof.
 
-    ``time_budget`` (seconds, optional) caps total sampling time. It is shared
-    equally between candidates, each still gets at least MIN_BUDGET_SIMULATIONS
-    runs, and the returned ``simulations`` is the smallest run count any
-    candidate received. Without it, behaviour is unchanged.
+    With ``time_budget``, sample complete rounds across all candidates so they
+    receive equal run counts. At least MIN_BUDGET_SIMULATIONS rounds run (unless
+    fewer were requested). The deadline is checked between rounds, so this is
+    a soft budget. Wall-clock termination is not reproducible even with a
+    seeded generator; omit the budget for reproducible fixed-work sampling.
     """
     if time_budget is not None and time_budget <= 0:
         raise ValueError("time_budget must be positive")
+    if simulations <= 0:
+        raise ValueError("simulations must be positive")
     moves = game.legal_moves()
     if not moves:
         return None
@@ -1545,26 +1601,29 @@ def best_move(game, simulations=SIMULATIONS, rng=None, time_budget=None):
         return Recommendation(position, 1.0, Evidence.PROVEN)
 
     rng = rng or random
-    start = time.monotonic()
     scored = []
-    runs_used = []
-    for index, position in enumerate(moves, start=1):
-        deadline = (
-            None if time_budget is None
-            else start + time_budget * index / len(moves)
-        )
-        if deadline is None:
-            rate, runs = probability(game, position, simulations, rng), simulations
-        else:
-            rate, runs = estimate(game, position, simulations, rng, deadline)
-        runs_used.append(runs)
-        scored.append((rate, move_score(game, position), position))
+    if time_budget is None:
+        runs = simulations
+        for position in moves:
+            scored.append((probability(game, position, simulations, rng),
+                           move_score(game, position), position))
+    else:
+        deadline = time.monotonic() + time_budget
+        wins = {position: 0 for position in moves}
+        runs = 0
+        while runs < simulations:
+            if runs >= MIN_BUDGET_SIMULATIONS and time.monotonic() >= deadline:
+                break
+            for position in moves:
+                wins[position] += bool(simulate(game, first_move=position, rng=rng))
+            runs += 1
+        scored = [(wins[p] / runs, move_score(game, p), p) for p in moves]
     success_rate, _, position = max(scored)
     return Recommendation(
         position,
         success_rate,
         Evidence.SAMPLED,
-        min(runs_used),
+        runs,
     )
 
 
@@ -1626,27 +1685,28 @@ def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_0
         return done("incomplete", reason=f"invalid_deal: {exc}")
     # Game fields are mutable, so re-validate rather than trust the constructor.
     try:
-        if any(c == "?" for c in game.board):
-            return done("incomplete", reason="unknown_cards")
         removed = set(game.removed)
         # Game.play leaves a played card on the board and also on the waste: count it once.
-        validate_deal(["--" if p in removed else c for p, c in enumerate(game.board, 1)],
-                      game.waste, True, game.stock)
+        board, waste, _, stock = validate_deal(
+            ["--" if p in removed else c for p, c in enumerate(game.board, 1)],
+            game.waste, True, game.stock)
+        if "?" in board:
+            return done("incomplete", reason="unknown_cards")
         if any(not isinstance(p, int) or isinstance(p, bool) or not 1 <= p <= TOTAL_TABLEAU for p in removed):
             raise ValueError("removed has invalid positions")
-        if any(p not in removed for p, c in enumerate(game.board, 1) if c == "--"):
+        if any(p not in removed for p, c in enumerate(board, 1) if c == "--"):
             raise ValueError("board has cleared slots not in removed")
         if any(not BLOCKER_SETS[p] <= removed for p in removed):
             raise ValueError("removed card is still covered")
-        has_joker = bool(game.stock) and game.stock[-1] == JOKER
-        if require_full_deal and (removed or game.waste == JOKER
-                                  or len(game.stock) != (24 if has_joker else 23)):
+        has_joker = bool(stock) and stock[-1] == JOKER
+        if require_full_deal and (removed or waste == JOKER
+                                  or len(stock) != TOTAL_STOCK + int(has_joker)):
             return done("incomplete", reason="not_full_deal")
-        if require_joker and not (has_joker and not removed and game.waste != JOKER):
+        if require_joker and not (has_joker and not removed and waste != JOKER
+                                  and len(stock) == TOTAL_STOCK + 1):
             return done("incomplete", reason="joker_missing")
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         return done("incomplete", reason=f"invalid_deal: {exc}")
-    board, stock = list(game.board), list(game.stock)  # validated above
     n, full = len(stock), (1 << TOTAL_TABLEAU) - 1
     need = [sum(1 << (b - 1) for b in BLOCKER_SETS[p]) for p in range(1, TOTAL_TABLEAU + 1)]
     start = sum(1 << (p - 1) for p in removed)
@@ -1687,7 +1747,7 @@ def solve_complete(game, time_budget=None, max_nodes=5_000_000, max_memo=3_000_0
         return res
 
     try:
-        res = go(start, game.waste, 0)
+        res = go(start, waste, 0)
     except _Budget:
         return done("unknown", reason=why[0], nodes=nodes[0])
     return done("unsolvable" if res is None else "solved", res or (), nodes=nodes[0])
@@ -1708,19 +1768,20 @@ def main(argv=None):
     print("=" * 72)
 
     history = tritowers_cli.UndoHistory()
+    exact_plan = None
+    before_prompt = lambda: checkpoint(history, game, rng)
 
     while True:
-
-        checkpoint(history, game, rng)
 
         # --------------------------------------------------------------
         # Ask for newly exposed unknown cards.
         # --------------------------------------------------------------
 
         try:
-            reveal_unknowns(game, read_card=read_rank_undoable)
+            reveal_unknowns(game, read_card=read_rank_undoable, before_prompt=before_prompt)
         except UndoRequested:
             game = rewind(history, rng)
+            exact_plan = None
             print("Undid the last step.")
             continue
 
@@ -1739,6 +1800,28 @@ def main(argv=None):
             print("=" * 72)
 
             return
+
+        # A completely known position can be searched exactly. Reuse the
+        # verified line so each automatic step does not repeat the search.
+        if exact_plan is None and game.stock_known and all(
+                card != "?" for p, card in enumerate(game.board, 1) if p not in game.removed):
+            result = solve_complete(game, time_budget=args.time_budget, max_nodes=500_000)
+            if result.status == "solved":
+                exact_plan = list(result.moves)
+            elif result.status == "unsolvable":
+                print("No winning line exists with these known cards (draw only when stuck).")
+                return
+            else:
+                print("Exact search did not finish; recommendations below are sampled.")
+        if exact_plan:
+            step = exact_plan.pop(0)
+            if step[0] == "draw":
+                draw(game)
+            else:
+                position = step[1]
+                print(f"\nPLAY {game.board[position - 1]} @ {position:02d} [PROVEN: verified winning line]")
+                game.play(position)
+            continue
 
         # --------------------------------------------------------------
         # Find legal tableau moves.
@@ -1763,9 +1846,10 @@ def main(argv=None):
                 return
 
             try:
-                draw(game, read_card=read_rank_undoable)
+                draw(game, read_card=read_rank_undoable, before_prompt=before_prompt)
             except UndoRequested:
                 game = rewind(history, rng)
+                exact_plan = None
                 print("Undid the last step.")
 
             continue
@@ -1837,10 +1921,4 @@ if __name__ == "__main__":
 
         print(
             "\nSolver stopped."
-        )
-
-    except Exception as error:
-
-        print(
-            f"\nERROR: {error}"
         )

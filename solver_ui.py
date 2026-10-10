@@ -26,7 +26,8 @@ def to_int(value, name, lo=None, hi=None):
     return n
 
 MAX_STOCK = 23
-RECOMMEND_TIME_BUDGET = 20.0
+MAX_SIMULATIONS = 2000
+RECOMMEND_TIME_BUDGET = 2.0
 
 def guard_open(session, need_no_reveals=True):
     g = session.game
@@ -34,6 +35,7 @@ def guard_open(session, need_no_reveals=True):
     if need_no_reveals and pending_reveals(g): raise ValueError("Reveal the yellow ? cards first.")
 
 def parse_board(text):
+    if not isinstance(text, str): raise ValueError("Board must be text containing 28 card entries.")
     tokens = [t for t in text.replace(",", " ").split() if t]
     if len(tokens) != 28: raise ValueError(f"Need 28 board entries (positions 1-28), got {len(tokens)}. Use ? for a covered card and -- for an empty slot.")
     return tokens
@@ -43,6 +45,7 @@ def new_session(board_text, waste, stock, joker=False):
     if not isinstance(joker, bool):
         raise ValueError("Joker mode must be true or false.")
     board = parse_board(board_text)
+    if not isinstance(waste, str) or not waste.strip(): raise ValueError("Choose the current waste rank.")
     stock = to_int(stock, "Stock", 0, MAX_STOCK + int(joker))
     return Session(solver.Game(board, waste, False, stock, joker_in_stock=joker))
 
@@ -106,17 +109,18 @@ def estimate_moves(game, moves, samples=ESTIMATE_SAMPLES, budget=ESTIMATE_BUDGET
     hidden = [i for i, c in enumerate(game.board) if c == "?" and (i + 1) not in game.removed]
     pool = game.unknown_card_pool()
     stock_n = 0 if game.stock_known else game.stock_remaining - int(game.joker_in_stock)
-    if len(pool) != len(hidden) + stock_n: return None
+    if not game.stock_known and len(pool) != len(hidden) + stock_n: return None
+    if game.stock_known and hidden and len(pool) != len(hidden): return None
     stats = {p: {"won": 0, "lost": 0, "unknown": 0, "n": 0} for p in moves}
     deadline = time.monotonic() + budget; done = 0
     single = not hidden and game.stock_known
-    while done < (1 if single else samples) and (done < 20 or time.monotonic() < deadline):
+    while done < (1 if single else samples) and time.monotonic() < deadline:
         comp = _completion(game, pool, hidden, rng); done += 1
         for p in moves:
             g = comp.copy()
             try: g.play(p)
             except Exception: continue
-            r = solver.solve_complete(g, time_budget=SOLVE_BUDGET, draw_only_when_stuck=True)
+            r = solver.solve_complete(g, time_budget=min(SOLVE_BUDGET, max(0, deadline - time.monotonic())), draw_only_when_stuck=True)
             st = stats[p]; st["n"] += 1
             if r.status == "solved": st["won"] += 1
             elif r.status == "unsolvable": st["lost"] += 1
@@ -143,9 +147,22 @@ def foresight_line(session, position, seed=None):
 def recommend_detail(session, simulations=solver.SIMULATIONS, seed=None):
     """Return (text, position|None, proven|None, rate|None, sims)."""
     guard_open(session)
-    sims = to_int(simulations, "Simulations", 1, 100000)
+    sims = to_int(simulations, "Simulations", 1, MAX_SIMULATIONS)
     rng = random.Random(to_int(seed, "Seed")) if seed not in (None, "") else None
-    rec = solver.best_move(session.game, simulations=sims, rng=rng, time_budget=RECOMMEND_TIME_BUDGET)
+    game = session.game
+    if game.stock_known and not pending_reveals(game) and all(
+            c != "?" for p, c in enumerate(game.board, 1) if p not in game.removed):
+        exact = solver.solve_complete(game, time_budget=None if rng is not None else RECOMMEND_TIME_BUDGET,
+                                      max_nodes=200_000)
+        if exact.status == "solved" and exact.moves:
+            step = exact.moves[0]
+            if step[0] == "draw":
+                return "Draw from the stock. Proven: a verified winning line starts with this draw.", None, True, 1.0, 0
+            return f"Play position {step[1]:02d}. Proven: a verified winning line starts with this move.", step[1], True, 1.0, 0
+        if exact.status == "unsolvable":
+            return "No winning line exists with these known cards (draw only when stuck).", None, False, 0.0, 0
+    rec = solver.best_move(game, simulations=sims, rng=rng,
+                           time_budget=None if rng is not None else RECOMMEND_TIME_BUDGET)
     if rec is None:
         return ("No legal move: draw from the stock." if session.game.stock_remaining else "No legal move and stock empty."), None, None, None, 0
     if rec.is_proven: return f"Play position {rec.position:02d}. Proven: this move is guaranteed by the known cards.", rec.position, True, 1.0, 0
@@ -172,7 +189,11 @@ def do_reveal(session, position, rank):
 def do_draw(session, rank):
     guard_open(session)
     if session.game.stock_empty: raise ValueError("Stock is empty.")
+    if not session.game.stock_known and (not isinstance(rank, str) or not rank.strip()):
+        raise ValueError("Choose the rank of the drawn card.")
     session.checkpoint()
-    try: session.game.observe_draw(rank)
+    try:
+        if session.game.stock_known: session.game.draw_known()
+        else: session.game.observe_draw(rank)
     except Exception: session.history.pop(); raise
     session.log.append(f"Drew {session.game.waste}.")

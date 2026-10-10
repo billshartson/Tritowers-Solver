@@ -1,20 +1,142 @@
 """Plain HTTP front end (no Gradio queue, no SSE). Every action is a JSON POST that the page can safely retry:
 the server caches the response per request id, so a retry after a dropped connection never applies an action twice.
 Run: python web_app.py   (PORT env, default 7860)."""
-import os, threading, time, uuid
+import os, threading, time, uuid, logging
 from collections import OrderedDict
 from pathlib import Path
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile, Request, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 import solver, solver_ui as ui
+from web_shared import GEO, ASPECT, view, solve_deal, photo_response
 
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 MAX_SESSIONS = 300
+MAX_SESSIONS_PER_CLIENT = 20
+SESSION_TTL = 3600
+MAX_REPLY_CACHE = 128
+MAX_SESSION_ACTIONS = 512
+MUTATING_ACTIONS = {"play", "reveal", "draw", "undo"}
+MAX_REQUEST_CACHE = 600
+MAX_SIMULATIONS = 2000
+log = logging.getLogger(__name__)
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="TriTowers")
 _sessions = OrderedDict()   # sid -> {"s": Session, "lock": Lock, "replies": {req_id: reply|Event}, "advice": dict|None}
 _glock = threading.Lock()
 _TEMPLATES = None
+_requests = OrderedDict()
+_cpu_slots = threading.BoundedSemaphore(2)
+_photo_slots = threading.BoundedSemaphore(1)
+_pre_jobs = OrderedDict()
+_pre_condition = threading.Condition()
+_pre_worker = None
+
+class RetryLater(Exception):
+    pass
+
+
+def _retry(message="The server is busy. Please retry shortly.", *, pending=False):
+    return {"ok": False, "pending" if pending else "busy": True,
+            "retry_after": 1, "message": message}
+
+
+def _request_id(body):
+    rid = body.get("req_id")
+    if rid is None: return uuid.uuid4().hex
+    if not isinstance(rid, str) or not rid or len(rid) > 128:
+        raise ValueError("Request ID must be a nonempty string of at most 128 characters.")
+    return rid
+
+
+def _client(request):
+    # Never trust a client-supplied forwarded-for header for admission limits.
+    return request.client.host if request.client else "local"
+
+
+def _text(value, name, maximum=1024):
+    if not isinstance(value, str): raise ValueError(f"{name} must be text.")
+    if len(value) > maximum: raise ValueError(f"{name} is too long.")
+    return value
+
+
+def _trim(cache, limit):
+    # A running request must remain reserved even under cache pressure.
+    for key in list(cache):
+        if len(cache) <= limit: break
+        if not isinstance(cache[key], threading.Event): del cache[key]
+
+
+def _claim(cache, key, limit):
+    with _glock:
+        cached = cache.get(key)
+        if isinstance(cached, threading.Event): return None, _retry("That request is still running.", pending=True)
+        if cached is not None: return None, cached
+        if sum(isinstance(value, threading.Event) for value in cache.values()) >= limit:
+            return None, _retry()
+        event = threading.Event(); cache[key] = event
+        _trim(cache, limit)
+        return event, None
+
+
+def _finish(cache, key, event, reply, limit):
+    with _glock:
+        if reply.get("busy") is True or reply.get("pending") is True:
+            cache.pop(key, None)
+        else:
+            cache[key] = reply
+            _trim(cache, limit)
+        event.set()
+    return reply
+
+
+def _expire_sessions():
+    now = time.monotonic()
+    for sid, entry in list(_sessions.items()):
+        if now - entry["touched"] > SESSION_TTL and not entry["lock"].locked():
+            entry["active"] = False
+            _sessions.pop(sid, None)
+            with _pre_condition: _pre_jobs.pop(sid, None)
+
+
+async def _too_large(request, error):
+    return JSONResponse({"ok": False, "message": "Upload or request is too large."}, status_code=413)
+
+
+class RequestBodyLimit:
+    """Bound streamed requests before JSON/multipart parsers buffer or spool them."""
+    def __init__(self, app): self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+        from tritowers_vision.image import MAX_BYTES
+        limit = MAX_BYTES + 1024 * 1024 if scope["path"] == "/api/photo" else 16384
+        length = dict(scope["headers"]).get(b"content-length")
+        if length is not None:
+            try:
+                size = int(length)
+                if size < 0: raise ValueError()
+            except ValueError:
+                response = JSONResponse({"ok": False, "message": "Invalid request length."}, status_code=400)
+                return await response(scope, receive, send)
+            if size > limit:
+                response = await _too_large(None, None)
+                return await response(scope, receive, send)
+        received = 0
+        async def bounded_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit: raise HTTPException(status_code=413)
+            return message
+        await self.app(scope, bounded_receive, send)
+
+
+app.add_exception_handler(413, _too_large)
+app.add_middleware(RequestBodyLimit)
+
 
 def _templates():
     global _TEMPLATES
@@ -26,242 +148,237 @@ def _templates():
         else: _TEMPLATES = []
     return _TEMPLATES
 
-def geometry():
-    xs = {p: float(p - 19) for p in range(19, 29)}
-    for p in sorted(solver.BLOCKERS, reverse=True): xs[p] = sum(xs[b] for b in solver.BLOCKERS[p]) / 2
-    ys = {p: next(i for i, row in enumerate(ui.ROWS) if p in row) for p in range(1, 29)}
-    XU, YU, W, H = 58, 76, 52, 68
-    CW, CH = 9 * XU + W, 3 * YU + H
-    return {p: (round(xs[p] * XU / CW * 100, 3), round(ys[p] * YU / CH * 100, 3)) for p in range(1, 29)}, round(CW / CH, 4)
-GEO, ASPECT = geometry()
-
-def view(entry, message="", ok=True, extra=None):
-    s = entry["s"]; g = s.game; snap = g.state_snapshot(); exposed = set(g.exposed()); legal = set(g.legal_moves()); pend = set(ui.pending_reveals(g))
-    advice = entry.get("advice")
-    cells = []
-    for p in range(1, 29):
-        if p in snap["removed"]: kind, card = "gone", ""
-        elif snap["board"][p - 1] == "?": kind, card = ("ask" if p in pend else "back"), "?"
-        else: kind, card = ("play" if p in legal else "up" if p in exposed else "blocked"), snap["board"][p - 1]
-        cells.append({"p": p, "card": card, "kind": kind, "x": GEO[p][0], "y": GEO[p][1]})
-    over = g.remaining() == 0
-    out = {"ok": ok, "message": message, "cells": cells, "aspect": ASPECT, "waste": snap["waste"], "remaining": snap["remaining"],
-           "stock": snap["stock_remaining"], "joker": bool(snap.get("joker_in_stock")), "status": ui.status(s), "pending": sorted(pend), "over": over,
-           "can_undo": bool(s.history), "can_draw": (not over) and (not pend) and snap["stock_remaining"] > 0,
-           "log": s.log[-12:], "advice": advice, "rev": len(s.log)}
-    if extra: out.update(extra)
-    return out
-
 def _get(sid):
+    if not isinstance(sid, str) or len(sid) > 128: return None
     with _glock:
-        e = _sessions.get(sid)
-        if e: _sessions.move_to_end(sid)
-        return e
+        _expire_sessions()
+        entry = _sessions.get(sid)
+        if entry: entry["touched"] = time.monotonic()
+        return entry
 
 @app.get("/", response_class=HTMLResponse)
 def index(): return (HERE / "web" / "index.html").read_text(encoding="utf-8")
+
+app.mount("/web", StaticFiles(directory=HERE / "web"), name="web")
 
 @app.get("/api/geo")
 def api_geo(): return {"geo": {str(k): v for k, v in GEO.items()}, "aspect": ASPECT}
 
 @app.get("/health")
-def health(): return {"ok": True, "templates": len(_templates())}
+async def health(): return {"ok": True}
 
 @app.post("/api/new")
-def api_new(body: dict):
+def api_new(body: dict, request: Request):
     try:
-        s = ui.new_session(body.get("board", ""), str(body.get("waste", "")).strip(), body.get("stock", 23), joker=bool(body.get("joker", False)))
-        if not str(body.get("waste", "")).strip(): raise ValueError("Pick the waste card first.")
-    except Exception as e: return {"ok": False, "message": str(e)}
-    sid = body.get("sid") or uuid.uuid4().hex
-    entry = {"s": s, "lock": threading.Lock(), "replies": {}, "advice": None}
+        rid = _request_id(body)
+        board = _text(body.get("board", ""), "Board")
+        waste = _text(body.get("waste", ""), "Waste", 16).strip()
+        if not waste: raise ValueError("Pick the waste card first.")
+        joker = body.get("joker", False)
+        if not isinstance(joker, bool): raise ValueError("Joker mode must be true or false.")
+        session = ui.new_session(board, waste, body.get("stock", 23), joker=joker)
+    except ValueError as error: return {"ok": False, "message": str(error)}
+    owner = _client(request); key = (owner, "new", rid)
+    # Creation IDs live with the session, so polling/solve cache churn cannot
+    # create a second game. A retry resumes its current state, not its first view.
     with _glock:
-        _sessions[sid] = entry
-        while len(_sessions) > MAX_SESSIONS: _sessions.popitem(last=False)
-    _precompute(entry)
-    r = view(entry); r["sid"] = sid; return r
+        _expire_sessions()
+        existing = next((entry for entry in _sessions.values() if entry.get("new_key") == key), None)
+        if existing:
+            existing["touched"] = time.monotonic()
+        else:
+            cached = _requests.get(key)
+            if isinstance(cached, dict) and cached.get("sid"):
+                _requests.pop(key, None)  # stale successful reply for an expired game
+    if existing:
+        if not existing["lock"].acquire(blocking=False): return _retry()
+        try:
+            reply = view(existing); reply["sid"] = existing["sid"]
+            return reply
+        finally: existing["lock"].release()
+    event, cached = _claim(_requests, key, MAX_REQUEST_CACHE)
+    if cached is not None: return cached
+    try:
+        with _glock:
+            _expire_sessions()
+            if len(_sessions) >= MAX_SESSIONS or sum(e["owner"] == owner for e in _sessions.values()) >= MAX_SESSIONS_PER_CLIENT:
+                return _finish_unlocked_new_limit(key, event)
+            sid = uuid.uuid4().hex
+            entry = {"s": session, "sid": sid, "owner": owner, "new_key": key, "active": True,
+                     "touched": time.monotonic(), "lock": threading.Lock(),
+                     "replies": OrderedDict(), "applied": {}, "advice": None}
+            _sessions[sid] = entry
+        _precompute(entry)
+        reply = view(entry); reply["sid"] = sid
+    except Exception:
+        log.exception("Could not start game")
+        reply = {"ok": False, "message": "Could not start this game. Please try again."}
+    return _finish(_requests, key, event, reply, MAX_REQUEST_CACHE)
+
+
+def _finish_unlocked_new_limit(key, event):
+    # Caller already holds _glock; do not recursively acquire it.
+    reply = {"ok": False, "message": "Too many active games. Resume an existing game or wait for an old game to expire."}
+    _requests[key] = reply; event.set(); _trim(_requests, MAX_REQUEST_CACHE)
+    return reply
+
 
 def _key(game):
-    return repr((list(game.board), game.waste, game.stock_remaining, list(getattr(game, "stock", []) or [])))
+    stock = tuple(game.stock) if game.stock_known else game.stock
+    return (tuple(game.board), game.waste, game.stock_known, stock,
+            tuple(sorted(game.removed)), bool(game.joker_in_stock))
 
-_pre_sem = threading.Semaphore(1)   # one background solve at a time per process (2 cores)
+
+def _advice(game, sims=1200, seed=None):
+    tmp = ui.Session(game)
+    text, pos, proven, rate, count = ui.recommend_detail(tmp, sims, seed)
+    if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {game.board[pos - 1]} marked with the blue star.")
+    foresight = ui.foresight_line(tmp, pos, seed) if pos else None
+    return {"text": text, "pos": pos, "proven": proven, "rate": rate,
+            "sims": count, "foresight": foresight}
+
+
+def _background_work():
+    while True:
+        with _pre_condition:
+            _pre_condition.wait_for(lambda: bool(_pre_jobs))
+            _, (entry, pre, game) = _pre_jobs.popitem(last=False)
+        try:
+            with _cpu_slots:
+                if not entry["active"] or entry.get("pre") is not pre: continue
+                pre["res"] = _advice(game)
+        except Exception:
+            log.exception("Background advice failed")
+        finally:
+            pre["done"].set()
+
 
 def _precompute(entry):
-    """Start computing the recommendation for the current state in the background."""
-    s = entry["s"]
-    try:
-        if s.game.remaining() == 0 or ui.pending_reveals(s.game): entry["pre"] = None; return
-        game = s.game.copy(); key = _key(game)
-    except Exception: entry["pre"] = None; return
-    cur = entry.get("pre")
-    if cur and cur["key"] == key: return
-    pre = {"key": key, "done": threading.Event(), "res": None}; entry["pre"] = pre
-    def work():
-        try:
-            with _pre_sem:
-                if entry.get("pre") is not pre: pre["done"].set(); return   # superseded before starting
-                tmp = ui.Session(game)
-                text, pos, proven, rate, sims = ui.recommend_detail(tmp, 1200, None)
-                if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {game.board[pos - 1]} marked with the blue star.")
-                fs = None
-                try:
-                    if pos: fs = ui.foresight_line(tmp, pos)
-                except Exception: fs = None
-                pre["res"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims, "foresight": fs}
-        except Exception: pre["res"] = None
-        finally: pre["done"].set()
-    threading.Thread(target=work, daemon=True).start()
+    """One worker, with at most one queued (latest) state for each live session."""
+    global _pre_worker
+    game = entry["s"].game
+    if game.remaining() == 0 or ui.pending_reveals(game):
+        entry["pre"] = None
+        with _pre_condition: _pre_jobs.pop(entry["sid"], None)
+        return
+    key = _key(game); current = entry.get("pre")
+    if current and current["key"] == key: return
+    pre = {"key": key, "done": threading.Event(), "res": None}
+    entry["pre"] = pre
+    with _pre_condition:
+        _pre_jobs[entry["sid"]] = (entry, pre, game.copy())
+        if _pre_worker is None or not _pre_worker.is_alive():
+            _pre_worker = threading.Thread(target=_background_work, name="tritowers-advice", daemon=True)
+            _pre_worker.start()
+        _pre_condition.notify()
+
 
 def _adopt(entry):
-    """If the background result matches the current state, show it as the advice."""
     pre = entry.get("pre")
-    if pre and pre["done"].is_set() and pre["res"] and not entry.get("advice"):
-        try:
-            if pre["key"] == _key(entry["s"].game): entry["advice"] = pre["res"]
-        except Exception: pass
+    if pre and pre["done"].is_set() and pre["res"] and pre["key"] == _key(entry["s"].game):
+        entry["advice"] = pre["res"]
+
 
 def _do(entry, op, body):
-    s = entry["s"]; msg = ""
-    if op == "play":
-        before = s.game.board[ui.to_int(body.get("pos"), "Position", 1, 28) - 1]
-        ui.do_play(s, body.get("pos")); entry["advice"] = None; msg = s.log[-1]
-    elif op == "reveal": ui.do_reveal(s, body.get("pos"), str(body.get("rank", ""))); entry["advice"] = None; msg = s.log[-1]
-    elif op == "draw": ui.do_draw(s, "*" if (s.game.joker_in_stock and s.game.stock_remaining == 1) else str(body.get("rank", ""))); entry["advice"] = None; msg = s.log[-1]
-    elif op == "state": msg = ""
-    elif op == "undo": s.undo(); entry["advice"] = None; msg = s.log[-1]
+    session = entry["s"]
+    if op == "play": ui.do_play(session, body.get("pos"))
+    elif op == "reveal": ui.do_reveal(session, body.get("pos"), _text(body.get("rank", ""), "Rank", 16))
+    elif op == "draw":
+        rank = "*" if session.game.joker_in_stock and session.game.stock_remaining == 1 else _text(body.get("rank", ""), "Rank", 16)
+        ui.do_draw(session, rank)
+    elif op == "undo": session.undo()
+    elif op == "state": _adopt(entry); return ""
     elif op == "recommend":
+        _adopt(entry)
+        if entry.get("advice"): return ""
+        sims = min(MAX_SIMULATIONS, ui.to_int(body.get("sims", 1200), "Simulations", 1))
+        seed = body.get("seed")
+        if seed not in (None, ""): seed = ui.to_int(seed, "Seed")
         pre = entry.get("pre")
-        if pre and pre["key"] == _key(s.game):
-            pre["done"].wait(40); _adopt(entry)
-            if entry.get("advice"): return ""
-        text, pos, proven, rate, sims = ui.recommend_detail(s, body.get("sims", 1200), body.get("seed"))
-        if pos: text = text.replace(f"Play position {pos:02d}.", f"Play the {s.game.board[pos - 1]} marked with the blue star.")
-        fs = None
-        try:
-            if pos: fs = ui.foresight_line(s, pos)
-        except Exception: fs = None
-        entry["advice"] = {"text": text, "pos": pos, "proven": proven, "rate": rate, "sims": sims, "foresight": fs}
+        if pre and pre["key"] == _key(session.game) and not pre["done"].is_set():
+            with _pre_condition:
+                if entry["sid"] in _pre_jobs:
+                    _pre_jobs.move_to_end(entry["sid"], last=False)
+            raise RetryLater("Advice is being calculated. Please retry shortly.")
+        if not _cpu_slots.acquire(blocking=False): raise RetryLater()
+        try: entry["advice"] = _advice(session.game.copy(), sims, seed)
+        finally: _cpu_slots.release()
+        return ""
     else: raise ValueError("Unknown action.")
-    if op in ("play", "reveal", "draw", "undo"): _precompute(entry)
-    if op == "state": _adopt(entry)
-    return msg
+    entry["advice"] = None
+    _precompute(entry)
+    return session.log[-1]
 
 @app.post("/api/act")
 def api_act(body: dict):
     entry = _get(body.get("sid", ""))
     if not entry: return {"ok": False, "gone": True, "message": "This game expired on the server. Start again."}
-    rid = str(body.get("req_id") or uuid.uuid4().hex)
-    with _glock:
-        cached = entry["replies"].get(rid)
-        if cached is None: entry["replies"][rid] = threading.Event()
-        while len(entry["replies"]) > 40: entry["replies"].pop(next(iter(entry["replies"])))
-    if isinstance(cached, threading.Event): cached.wait(60); cached = entry["replies"].get(rid)
-    if isinstance(cached, dict): return cached
-    ev = entry["replies"][rid]
-    with entry["lock"]:
-        try: msg = _do(entry, body.get("op"), body); reply = view(entry, msg)
-        except Exception as e: reply = view(entry, str(e), ok=False)
-    entry["replies"][rid] = reply; ev.set()
-    return reply
-
-def _replay_frames(game, moves):
-    """Replay a returned line on a fresh copy and return (frames, texts). Raises ValueError if any step is illegal."""
-    g = game.copy(); frames = []; texts = []
-    def frame(g, nxt):
-        f = view({"s": ui.Session(g.copy()), "advice": None}); f.pop("log", None); f.pop("advice", None)
-        f["next"] = nxt; return f
-    for mv in moves:
-        nxt = mv[1] if mv[0] == "play" else None
-        frames.append(frame(g, nxt))
-        if mv[0] == "play":
-            card = g.play(int(mv[1])); texts.append(f"Play the {card} (position {int(mv[1])})")
-        elif mv[0] == "draw":
-            if not g.stock: raise ValueError("Line draws from an empty stock.")
-            card = g.stock.pop(0); g.waste = card; texts.append(f"Draw from the stock: {card}")
-        else: raise ValueError("Unknown step.")
-    frames.append(frame(g, None))
-    if g.remaining() != 0: raise ValueError("Line does not clear the tableau.")
-    return frames, texts
+    try: rid = _request_id(body)
+    except ValueError as error: return {"ok": False, "message": str(error)}
+    op = body.get("op")
+    if not isinstance(op, str): return {"ok": False, "message": "Action must be text."}
+    if op == "state":
+        if not entry["lock"].acquire(blocking=False): return _retry()
+        try:
+            _adopt(entry)
+            return view(entry)
+        finally: entry["lock"].release()
+    event, cached = _claim(entry["replies"], rid, MAX_REPLY_CACHE)
+    if cached is not None:
+        if "cells" in cached:
+            if not entry["lock"].acquire(blocking=False): return _retry()
+            try: return view(entry, cached.get("message", ""), ok=cached.get("ok") is True)
+            finally: entry["lock"].release()
+        return cached
+    if not entry["lock"].acquire(blocking=False):
+        return _finish(entry["replies"], rid, event, _retry(), MAX_REPLY_CACHE)
+    try:
+        try:
+            if rid in entry["applied"]:
+                reply = view(entry, entry["applied"][rid])
+            else:
+                if op in MUTATING_ACTIONS and len(entry["applied"]) >= MAX_SESSION_ACTIONS:
+                    raise ValueError("This game has reached its action limit. Start a new game using the current board.")
+                message = _do(entry, op, body)
+                if op in MUTATING_ACTIONS: entry["applied"][rid] = message
+                reply = view(entry, message)
+        except RetryLater as error: reply = _retry(str(error) or "The server is busy. Please retry shortly.")
+        except ValueError as error: reply = view(entry, str(error), ok=False)
+        except Exception:
+            log.exception("Game action failed")
+            reply = view(entry, "Could not finish that action. Refresh the game and try again.", ok=False)
+    finally: entry["lock"].release()
+    return _finish(entry["replies"], rid, event, reply, MAX_REPLY_CACHE)
 
 @app.post("/api/solve")
-def api_solve(body: dict):
-    """Complete-deal mode: every card known, stock order known. Never guesses missing cards."""
-    board = str(body.get("board", "")).replace(",", " ").split(); waste = str(body.get("waste", "")).strip()
-    raw_stock = body.get("stock")
-    if raw_stock is None: raw_stock = []
-    if not isinstance(raw_stock, (list, tuple)): return {"ok": False, "message": "Stock must be a list of cards in draw order."}
-    stock = [str(x).strip() for x in raw_stock]
+def api_solve(body: dict, request: Request):
+    try: rid = _request_id(body)
+    except ValueError as error: return {"ok": False, "message": str(error)}
+    key = (_client(request), "solve", rid)
+    event, cached = _claim(_requests, key, MAX_REQUEST_CACHE)
+    if cached is not None: return cached
+    if not _cpu_slots.acquire(blocking=False):
+        return _finish(_requests, key, event, _retry(), MAX_REQUEST_CACHE)
     try:
-        stock_count = None if body.get("stock_count") is None else ui.to_int(body.get("stock_count"), "Stock count", 0, 24)
-        budget_in = float(body.get("time_budget", 20))
-    except Exception as e: return {"ok": False, "message": str(e) if "Stock count" in str(e) else "Time budget must be a number."}
-    missing = []
-    if len(board) != 28: return {"ok": False, "message": f"Need 28 board entries, got {len(board)}."}
-    missing += [f"tableau position {i}" for i, c in enumerate(board, 1) if c == "?"]
-    if not waste: missing.append("waste card")
-    if stock_count is not None and stock_count != len(stock): missing.append(f"stock order ({len(stock)} of {stock_count} cards entered)")
-    if missing:
-        return {"ok": True, "status": "incomplete", "message": "The deal is not complete, so I will not guess. Missing: " + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "") + ".", "missing": missing}
-    try: game = solver.Game(board, waste, True, stock)
-    except Exception as e: return {"ok": False, "message": str(e)}
-    fn = getattr(solver, "solve_complete", None)
-    if fn is None: return {"ok": True, "status": "unavailable", "message": "The exact solver is not installed in this build yet."}
-    budget = max(0.5, min(budget_in, 25))
-    def run(stuck, share):
-        return fn(game.copy(), time_budget=budget * share, require_full_deal=True, draw_only_when_stuck=stuck)
-    try:
-        res = run(True, 0.5); policy = "stuck"
-        if res.status in ("unsolvable", "unknown"):
-            res2 = run(False, 0.5)
-            if res2.status == "solved": res, policy = res2, "voluntary"
-            elif res.status == "unsolvable" and res2.status == "unsolvable": policy = "both"
-            elif res.status == "unsolvable": res = res2; policy = "voluntary"   # voluntary undecided: say so below
-            elif res2.status == "unsolvable": policy = "both"                    # voluntary unsolvable implies stuck-only unsolvable
-    except Exception as e: return {"ok": False, "message": f"Solver error: {e}"}
-    out = {"ok": True, "status": res.status, "policy": policy, "nodes": getattr(res, "nodes", None), "seconds": getattr(res, "seconds", None)}
-    if res.status == "solved":
-        try: frames, texts = _replay_frames(game, list(res.moves))
-        except Exception as e: return {"ok": False, "message": f"Solver returned a line that failed verification ({e}). Not shown."}
-        note = ("Valid whether or not the machine lets you draw while a play is available." if policy == "stuck" else
-                "Only works if the machine lets you draw while a play is available (not verified).")
-        out.update(message=f"Solved in {len(texts)} steps (line verified by replay). {note}", steps=texts, frames=frames)
-    elif res.status == "unsolvable" and policy == "both": out["message"] = "Proven unsolvable under both draw rules: the search was exhaustive and no winning line exists."
-    elif res.status == "unsolvable": out["message"] = "No line wins if you may only draw when no play is available. Whether voluntary draws would help was not decided, so this is NOT a full proof."; out["status"] = "unknown"
-    elif res.status == "unknown": out["message"] = f"Could not decide in the time limit ({getattr(res, 'reason', 'timeout')}). This is NOT a proof that it is unsolvable."
-    else: out["message"] = "The deal is not valid or complete for the solver: " + str(getattr(res, "reason", ""))
-    return out
+        try: reply = solve_deal(body)
+        except ValueError as error: reply = {"ok": False, "message": str(error)}
+        except Exception:
+            log.exception("Exact solve failed")
+            reply = {"ok": False, "message": "Could not solve this deal. Check the entries and try again."}
+    finally: _cpu_slots.release()
+    return _finish(_requests, key, event, reply, MAX_REQUEST_CACHE)
+
 
 @app.post("/api/photo")
 def api_photo(file: UploadFile = File(...), corners: str = Form("")):
-    """Read a photo or screenshot into a draft board. Sync on purpose: the work is CPU-bound, so it runs in the
-    thread pool instead of blocking the event loop. Never guesses: unread or uncertain cards come back as '?'."""
-    import base64, io
-    from tritowers_vision.image import MAX_BYTES, ImageInputError
-    from tritowers_vision.reader import board_tokens, read_photo
-    data = file.file.read(MAX_BYTES + 1)
-    if len(data) > MAX_BYTES: return {"ok": False, "message": f"Image is too large ({MAX_BYTES // (1024 * 1024)} MB max)."}
-    manual = None
-    if corners.strip():
-        try: nums = [float(x) for x in corners.replace(";", ",").split(",") if x.strip()]
-        except ValueError: return {"ok": False, "message": "Corners need 8 numbers."}
-        if len(nums) != 8: return {"ok": False, "message": "Corners need 8 numbers."}
-        manual = [(nums[i], nums[i + 1]) for i in range(0, 8, 2)]
+    """Bounded upload, decoded off the event loop; one photo worker per process."""
+    from tritowers_vision.image import MAX_BYTES
+    if not _photo_slots.acquire(blocking=False): return _retry("Another photo is being read. Please retry shortly.")
     try:
-        r = read_photo(data, _templates(), manual)
-    except (ImageInputError, ValueError) as e:
-        return {"ok": False, "message": f"Could not read that image: {e}"}
-    d = r.draft; tokens, waste = board_tokens(d)
-    review = [s.replace("tableau-", "").lstrip("0") if s != "waste" else "waste" for s in d["needs_human_review"]]
-    if not d["registration"]["trusted"]:
-        note = "The card layout was not found reliably, so check every card (a straighter photo of the whole screen helps). "
-    else:
-        note = ("Check: " + ", ".join(review) + ". " if review else "")
-    note += "Suit and the stock counter are not read: set the stock yourself. Check the picture before you start."
-    view = r.overlay.copy(); view.thumbnail((900, 900))
-    buf = io.BytesIO(); view.save(buf, format="JPEG", quality=80)
-    return {"ok": True, "board": tokens, "waste": waste, "note": note, "review": review,
-            "trusted": d["registration"]["trusted"], "overlay": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}
+        data = file.file.read(MAX_BYTES + 1)
+        return photo_response(data, corners, _templates())
+    finally: _photo_slots.release()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "7860")), log_level="warning")
+    uvicorn.run(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", "7860")), log_level="warning")

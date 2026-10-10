@@ -1,5 +1,11 @@
 # Guided draw-screen rank prototype
 
+This document describes the older, manually guided research modules (`draw_*`).
+The app's automatic all-cards-grid path is now `tritowers_vision/full_deal.py`,
+selected by `tritowers_vision/intake.py`. It uses public fonts, supplies an editable
+known-deal draft and does not call this private-template prototype. See
+[PHOTO-VALIDATION.md](../PHOTO-VALIDATION.md) for current app behavior and measurements.
+
 Source-only object detector, paired glyph extraction and rank proposal matcher for a full draw screen. Callers supply a BGR uint8 image, row guides, expected row counts and a privately curated paired template bank. No photo, guide, glyph or template data is bundled.
 
 This is separate from the existing 28-tableau photo reader. It does not replace that reader, change the UI or provide accepted solver input. Every match returns rank=null, accepted=false and needs_visual_review=true. Blank, constant and nonfinite query views abstain. Count, spacing and endpoint checks reject inconsistent geometry; passing them never makes a rank safe.

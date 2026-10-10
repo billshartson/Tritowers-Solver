@@ -19,7 +19,7 @@ from .rank2 import GH, GW, RANKS, normalize
 
 PX = 3                                   # output pixels per layout unit for the corner patch
 GLYPH_H = 37                             # rank band height for a tableau index, layout units (real ranks are 32-35)
-TABLEAU_CORNER = (-5, -5, 44, 58)        # patch around a tableau card's top-left corner, layout units (Q tails run low)
+TABLEAU_CORNER = (-5, -5, 52, 58)        # patch around a tableau card's top-left corner, layout units (Q tails run low)
 WASTE_CORNER = (-6, -6, 62, 78)          # the waste index is larger
 BANK = Path(__file__).with_name("data") / "font_glyphs.npz"
 # Acceptance gates: (best score, margin over the best other rank) for each tier.
@@ -57,7 +57,7 @@ def ink_mask(patch):
     return (d > thr).astype(np.uint8)
 
 
-def raw_glyph(patch, scale=1.0):
+def raw_glyph(patch, scale=1.0, *, with_box=False):
     """Binary rank glyph (variable size) or None. scale: index size relative to a tableau card.
 
     The rank occupies a band from its top down to the first clear gap (the space above the suit pip; smaller indexes
@@ -74,12 +74,16 @@ def raw_glyph(patch, scale=1.0):
         if x <= 0 or y <= 0 or x + w >= W or y + h >= H: continue                   # touches the patch edge
         if h > 50 * unit or w > 36 * unit: continue                                 # pips, art, card edges
         cands.append(i)
-    tops = [st[i, cv2.CC_STAT_TOP] for i in cands if st[i, cv2.CC_STAT_HEIGHT] >= 6 * unit]
+    tops = [st[i, cv2.CC_STAT_TOP] for i in cands if st[i, cv2.CC_STAT_HEIGHT] >= 15 * unit]
     if not tops: return None
     top = min(tops); bottom = top + int(GLYPH_H * unit)
     first = min((i for i in cands if st[i, cv2.CC_STAT_TOP] == top), key=lambda i: st[i, cv2.CC_STAT_LEFT])
     left = st[first, cv2.CC_STAT_LEFT]
-    column = [i for i in cands if top <= st[i, cv2.CC_STAT_TOP] < bottom and st[i, cv2.CC_STAT_LEFT] < left + 30 * unit]
+    column = [i for i in cands if top <= st[i, cv2.CC_STAT_TOP] < bottom
+              and st[i, cv2.CC_STAT_LEFT] < left + 30 * unit
+              and (st[i, cv2.CC_STAT_LEFT] >= left - 3 * unit
+                   or (st[i, cv2.CC_STAT_HEIGHT] >= .65 * st[first, cv2.CC_STAT_HEIGHT]
+                       and st[i, cv2.CC_STAT_WIDTH] >= 3 * unit))]
     rows = np.isin(lab, column)[top:bottom].any(axis=1)
     gap = max(2, int(round(2 * unit)))
     for y in range(int(0.45 * GLYPH_H * unit), len(rows) - gap):     # first empty run past a plausible glyph height
@@ -87,12 +91,33 @@ def raw_glyph(patch, scale=1.0):
     keep = [i for i in column if st[i, cv2.CC_STAT_TOP] < bottom - min(4 * unit, 0.2 * (bottom - top))]
     m = np.isin(lab, keep)[top:bottom].astype(np.float32); ys, xs = np.nonzero(m)
     if not len(xs): return None
-    return m[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    raw = m[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    box = (int(xs.min()), int(top + ys.min()), int(xs.max() + 1), int(top + ys.max() + 1))
+    return (raw, box) if with_box else raw
 
 
 def glyph(patch, scale=1.0):
     return normalize(raw_glyph(patch, scale))
 
+
+
+def extract(patch, scale=1.0):
+    """A glyph and separate crop-validity evidence, before any rank matching.
+
+    Reject blank/partial crops and suit pips exposed by losing the rank to a
+    connected card edge. A high match score cannot override ownership checks.
+    """
+    result = raw_glyph(patch, scale, with_box=True)
+    if result is None:
+        return None, {"valid": False, "reason": "no_complete_index"}
+    raw, (x0, y0, x1, y1) = result
+    unit = PX * scale
+    height = (y1 - y0) / unit
+    valid = bool(15 <= height <= 40 and 3 <= x0 / unit <= 30 and 3 <= y0 / unit <= 23
+                 and x1 < patch.shape[1] - 2 and y1 < patch.shape[0] - 2)
+    detail = {"valid": valid, "reason": "index_inside_card" if valid else "partial_or_displaced_index",
+              "box": [x0, y0, x1, y1]}
+    return (normalize(raw) if valid else None), detail
 
 def _render_bank(fonts):
     from PIL import Image, ImageDraw, ImageFont
@@ -138,15 +163,48 @@ def holes(g, thr=0.5):
     return sum(1 for i in range(2, n) if st[i, cv2.CC_STAT_AREA] >= 3)
 
 
+# Only the immutable, public font bank is cached. Private inputs and in-image
+# examples live for one read, so switching photos cannot contaminate later reads.
+_FONT_MATRIX = None
+
+
+def _prepare(templates):
+    ranks, rows = [], []
+    for rank, template in templates:
+        if template.shape != (GH, GW):
+            continue
+        blurred = cv2.GaussianBlur(template, (0, 0), 0.8)
+        for shifted in rank2._shifts(blurred):
+            centered = shifted.ravel() - shifted.mean()
+            rows.append(centered)
+            ranks.append(rank)
+    if not rows:
+        return [], np.empty((0, GH * GW), np.float32), np.empty(0, np.float32)
+    matrix = np.asarray(rows, np.float32)
+    return ranks, matrix, np.linalg.norm(matrix, axis=1)
+
+
+def _prepared(templates):
+    global _FONT_MATRIX
+    if templates is font_bank():
+        if _FONT_MATRIX is None:
+            _FONT_MATRIX = _prepare(templates)
+        return _FONT_MATRIX
+    return _prepare(templates)
+
+
 def _ranked(g, templates):
-    gb = cv2.GaussianBlur(g, (0, 0), 0.8); h = holes(g)
-    best = {}
-    for r, t in templates:
-        if t.shape != (GH, GW): continue
-        tb = cv2.GaussianBlur(t, (0, 0), 0.8)
-        v = max(rank2._ncc(gb, x) for x in rank2._shifts(tb))
-        if h not in HOLES.get(r, {h}): v -= HOLE_PENALTY
-        best[r] = max(best.get(r, -1.0), v)
+    ranks, matrix, norms = _prepared(templates)
+    if not ranks:
+        return []
+    blurred = cv2.GaussianBlur(g, (0, 0), 0.8)
+    query = blurred.ravel() - blurred.mean()
+    # einsum avoids a multithreaded BLAS launch for these small, frequent dots.
+    scores = np.einsum("ij,j->i", matrix, query, dtype=np.float64) / (norms * np.linalg.norm(query) + 1e-6)
+    h, best = holes(g), {}
+    for rank, score in zip(ranks, scores):
+        value = float(score) - (HOLE_PENALTY if h not in HOLES.get(rank, {h}) else 0)
+        best[rank] = max(best.get(rank, -1.0), value)
     return sorted(best.items(), key=lambda kv: -kv[1])
 
 
@@ -155,13 +213,13 @@ def font_tier_enabled():
     return os.environ.get("TT_FONT_TIER", "1").strip() != "0"
 
 
-def match(g, photo_templates=()):
+def match(g, photo_templates=(), *, font_scores=None):
     """(rank or None, score, margin, tier). Photo templates (same skin) first, then the bundled font bank.
 
     The photo tier's margin is taken against all 13 ranks: a rank with no photo template competes through its font
     score, so a glyph whose true rank has no template cannot win just because its rivals are missing."""
     if g is None or g.sum() == 0: return None, 0.0, 0.0, "none"
-    font = dict(_ranked(g, font_bank()))
+    font = dict(_ranked(g, font_bank())) if font_scores is None else font_scores
     photo = dict(_ranked(g, photo_templates)) if len(photo_templates) else {}
     best = (0.0, 0.0)
     if photo:
@@ -190,15 +248,19 @@ def read_ranks(found, templates=()):
     1. match() each glyph; font-tier reads are dropped when the image's font fit is below FONT_FIT.
     2. Confident reads become same-skin templates for the glyphs that abstained (a board repeats ranks, and copies of
        a rank on one screen are near-identical); only the photo-tier gate can accept them."""
-    templates = list(templates); fit = font_fit(found.values()); out = {}
+    templates = list(templates)
+    font_scores = {k: dict(_ranked(g, font_bank())) if g is not None and g.sum() else {} for k, g in found.items()}
+    tops = [max(scores.values()) for scores in font_scores.values() if scores]
+    fit = float(np.median(tops)) if tops else 0.0
+    out = {}
     for k, g in found.items():
-        r = match(g, templates)
+        r = match(g, templates, font_scores=font_scores[k])
         if r[3] == "font" and fit < FONT_FIT: r = (None, r[1], r[2], "font_unfit")
         out[k] = r
     local = [(r[0], found[k]) for k, r in out.items() if r[0]]
     for k, g in found.items():
         if out[k][0] is None and local:
-            r = match(g, templates + local)
+            r = match(g, templates + local, font_scores=font_scores[k])
             if r[3] == "photo": out[k] = (r[0], r[1], r[2], "same_image")
     return out, fit
 

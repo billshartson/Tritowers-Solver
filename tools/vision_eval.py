@@ -82,12 +82,25 @@ def draft_tokens(draft):
     return out
 
 
+class SlotScores(dict):
+    """Per-slot outcomes plus orthogonal localization/rank counters."""
+    pass
+
+
 def score(draft, board, waste):
     tok = draft_tokens(draft); flagged = set(draft.get("needs_human_review") or [])
     truth = dict(zip(SLOTS, list(board) + [waste]))
-    res = {}
+    res = SlotScores()
+    res.metrics = {"wrong_named": 0, "rank_abstentions": 0, "false_present": 0, "false_empty": 0, "unknown_state": 0}
     for slot in SLOTS:
         t, p = truth[slot], tok[slot]
+        state = draft.get("cards", {}).get(slot, {}).get("state", "unknown")
+        if p in RANKS and p != t: res.metrics["wrong_named"] += 1
+        if t in RANKS and p == "?": res.metrics["rank_abstentions"] += 1
+        if slot != "waste":
+            if state == "unknown": res.metrics["unknown_state"] += 1
+            elif t == "--" and state != "empty": res.metrics["false_present"] += 1
+            elif t != "--" and state == "empty": res.metrics["false_empty"] += 1
         if p == t: res[slot] = "correct"
         elif t in RANKS and p == "?": res[slot] = "abstain"
         elif slot in flagged: res[slot] = "flagged"
@@ -97,15 +110,16 @@ def score(draft, board, waste):
 
 def summarise(rows):
     """rows: list of (slot_results, truth, seconds)."""
-    n = len(rows); c = defaultdict(int); rk = defaultdict(int); exact = safe = 0; secs = 0.0
+    n = len(rows); c = defaultdict(int); rk = defaultdict(int); metrics = defaultdict(int); exact = safe = 0; secs = 0.0
     for res, truth, s in rows:
         secs += s
+        for name, count in getattr(res, "metrics", {}).items(): metrics[name] += count
         for slot, r in res.items():
             c[r] += 1
             if truth[slot] in RANKS: rk[r] += 1
         exact += all(r == "correct" for r in res.values()); safe += not any(r == "silent" for r in res.values())
     total = sum(c.values()) or 1; rtotal = sum(rk.values()) or 1
-    return {"images": n, "slot_correct": c["correct"] / total, "slot_abstain": c["abstain"] / total,
+    return {**dict(metrics), "images": n, "slot_correct": c["correct"] / total, "slot_abstain": c["abstain"] / total,
             "slot_flagged": c["flagged"] / total, "silent_per_image": c["silent"] / max(n, 1),
             "rank_correct": rk["correct"] / rtotal, "rank_abstain": rk["abstain"] / rtotal,
             "rank_wrong": (rk["flagged"] + rk["silent"]) / rtotal, "exact": exact / max(n, 1), "safe": safe / max(n, 1),
@@ -144,7 +158,7 @@ def load_labels(path):
 
 
 def table(results):
-    keys = ["images", "slot_correct", "slot_abstain", "silent_per_image", "rank_correct", "rank_abstain", "rank_wrong", "exact", "safe", "sec"]
+    keys = ["images", "slot_correct", "slot_abstain", "silent_per_image", "rank_correct", "rank_abstain", "rank_wrong", "wrong_named", "rank_abstentions", "false_present", "false_empty", "unknown_state", "exact", "safe", "sec"]
     head = f"{'reader':6} {'templates':9} {'mode':10} " + " ".join(f"{k:>15}" for k in keys)
     lines = [head, "-" * len(head)]
     for (reader, regime, mode), s in sorted(results.items()):
@@ -194,7 +208,8 @@ def main(argv=None):
                         img, _ = V.capture(screen, rng, mode)
                         variants[i].append((mode, V.encode(img, rng, mode)))
         for reader in readers:
-            glyphs = [READERS[reader][1](it["bytes"], it["board"], it["waste"]) for it in items]   # templates come from clean screens
+            glyphs = ([READERS[reader][1](it["bytes"], it["board"], it["waste"]) for it in items]
+                      if "photo" in regimes else [[] for _ in items])  # no-bank evaluation never extracts training glyphs
             for regime in regimes:
                 for i, it in enumerate(items):
                     tmpl = [] if regime == "none" else [g for j, gs in enumerate(glyphs) if j != i for g in gs]
