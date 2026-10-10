@@ -31,3 +31,16 @@ photos, not independent validation. Some partial right edges and stray ink
 remain visible, so score-only acceptance is still forbidden.
 
 This path is not wired into the UI or solver and nothing is deployed.
+
+### Card-edge components
+
+Foreground ownership drops thin vertical components only when they continue
+below the fitted rank band and have little horizontal overlap with the detected
+rank box. This is a geometry guard, not a rank-dependent filter. Detached
+horizontal strokes, rooted thin strokes, short vertical strokes and wider
+components keep the existing rules. Synthetic tests check these boundaries,
+soft/hard consistency, blank crops and unchanged neighbouring slots.
+
+This does not prove a crop is complete or identify every card edge. The matcher
+still returns review-only candidates, never accepted ranks. Private same-photo
+resampling checks are tuning evidence, not independent recognition accuracy.
