@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import sync_playwright
+pytestmark = pytest.mark.browser
 ROOT = Path(__file__).resolve().parents[1]
-CHROME = os.environ.get("TT_CHROME") or ("/usr/bin/google-chrome" if os.path.exists("/usr/bin/google-chrome") else None)
+CHROME = os.environ.get("TT_CHROME", "/usr/bin/google-chrome" if os.path.exists("/usr/bin/google-chrome") else "") or None
 PHOTO = os.environ.get("TT_TEST_PHOTO")          # optional private photo, never committed
 TEMPLATES = os.environ.get("TT_TEMPLATES")
 

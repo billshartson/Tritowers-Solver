@@ -1,3 +1,5 @@
+import os
+import pytest
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from tritowers_vision import rank2 as R2
@@ -16,7 +18,9 @@ def test_normalize_keeps_aspect_and_handles_empty():
     assert R2.normalize(None).sum() == 0 and R2.glyph(Image.new("RGB", (40, 40), "white")).sum() == 0
 
 def test_font_tier_reads_clean_rendered_ranks_and_waste_scale():
-    if not R2.synthetic_templates(): return        # open font not installed here
+    if not R2.synthetic_templates():
+        if os.environ.get("TT_REQUIRE_TEST_FONTS"): pytest.fail("Install fonts-liberation for legacy matcher coverage")
+        pytest.skip("Legacy matcher needs an installed Liberation font")
     for r in ("A", "7", "Q", "10", "K"):
         for size, scale in ((40, 1.0), (56, 1.5)):                    # waste index is larger than tableau
             p, sc, mg, tier = R2.match(R2.glyph(_render_patch(r, size), scale), [])

@@ -7,7 +7,7 @@ from PIL import Image,ImageOps,UnidentifiedImageError
 try:
     from pillow_heif import register_heif_opener; register_heif_opener()  # iPhone HEIC/HEIF photos
 except ImportError: pass
-MAX_BYTES=60*1024*1024; MAX_INPUT_PIXELS=150_000_000; MAX_PIXELS=20_000_000; MIN_SIDE=160; MIN_QUAD_AREA=1000.0; MIN_EDGE=20.0; OUTPUT_SIZE=(1024,768); ALLOWED_FORMATS={"JPEG","MPO","PNG","WEBP","HEIF","HEIC"}
+MAX_BYTES=60*1024*1024; MAX_INPUT_PIXELS=150_000_000; MAX_SIDE=1600; MAX_PIXELS=MAX_SIDE*MAX_SIDE; MIN_SIDE=160; MIN_QUAD_AREA=1000.0; MIN_EDGE=20.0; OUTPUT_SIZE=(1024,768); ALLOWED_FORMATS={"JPEG","MPO","PNG","WEBP","HEIF","HEIC"}
 class ImageInputError(ValueError): pass
 @dataclass(frozen=True)
 class ScreenExtraction:
@@ -24,20 +24,29 @@ def _read_bounded(source:str|Path|BinaryIO|bytes)->bytes:
     return data
 
 def normalize_image(source)->Image.Image:
+    """Orient and bound the working image before any NumPy/OpenCV allocation.
+
+    JPEG draft decoding avoids allocating all 48 MP for modern phone captures.
+    HEIF is decoded by Pillow's optional HEIF plugin; formats are checked from
+    content, not the filename supplied by a browser.
+    """
+    def normalized(image):
+        if image.width*image.height>MAX_INPUT_PIXELS:
+            raise ImageInputError(f"Image exceeds the {MAX_INPUT_PIXELS//1_000_000} megapixel safety limit.")
+        if image.format in ("JPEG", "MPO"):
+            scale=min(1.0, MAX_SIDE/max(image.size))
+            image.draft("RGB", (max(1,round(image.width*scale)), max(1,round(image.height*scale))))
+        image=ImageOps.exif_transpose(image)
+        image.thumbnail((MAX_SIDE,MAX_SIDE),Image.Resampling.LANCZOS)
+        return image.convert("RGB").copy()
     try:
+        if isinstance(source,Image.Image):
+            return normalized(source.copy())
         with Image.open(BytesIO(_read_bounded(source))) as image:
             if image.format not in ALLOWED_FORMATS: raise ImageInputError(f"Unsupported image format: {image.format}")
-            if image.width*image.height>MAX_INPUT_PIXELS: raise ImageInputError(f"Image exceeds the {MAX_INPUT_PIXELS//1_000_000} megapixel safety limit.")
-            if image.width*image.height>MAX_PIXELS:
-                # Big phone photos are shrunk on import to the working size (area MAX_PIXELS). JPEG decodes at reduced size.
-                scale=(MAX_PIXELS/(image.width*image.height))**0.5
-                if image.format in ("JPEG","MPO"): image.draft("RGB",(max(1,int(image.width*scale)),max(1,int(image.height*scale))))
-                image=ImageOps.exif_transpose(image).convert("RGB")
-                if image.width*image.height>MAX_PIXELS:
-                    s2=(MAX_PIXELS/(image.width*image.height))**0.5; image=image.resize((max(1,int(image.width*s2)),max(1,int(image.height*s2))),Image.LANCZOS)
-                return image
-            return ImageOps.exif_transpose(image).convert("RGB").copy()
-    except (UnidentifiedImageError,OSError) as error: raise ImageInputError("Could not decode this image.") from error
+            return normalized(image)
+    except (UnidentifiedImageError,OSError,Image.DecompressionBombError) as error:
+        raise ImageInputError("Could not decode this image. Choose a JPEG, PNG, WebP or supported HEIC photo.") from error
 
 def order_corners(points)->np.ndarray:
     points=np.asarray(list(points),dtype=np.float32)

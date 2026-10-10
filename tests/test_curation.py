@@ -41,3 +41,54 @@ class Tests(unittest.TestCase):
  def test_hash_nonfinite_rejected(self):
   with self.assertRaises(ValueError):digest(np.array([[np.nan]]))
 if __name__=='__main__':unittest.main()
+
+
+def test_lucky_rank_match_never_counts_as_clean_localization():
+    from tritowers_vision.curation_review import diagnostics
+    data = {'synthetic-query': [(np.eye(3, dtype=np.float32), 'Ac'),
+                                (np.fliplr(np.eye(3, dtype=np.float32)), '7h'),
+                                (np.zeros((3, 3), np.float32), '2d')]}
+    reasons = ['clean', 'wrong_neighbour', 'blank']
+    manifest = {'schema_version': 1, 'samples': [
+        {'photo_id': 'synthetic-query', 'slot_index': i, 'card_label': label,
+         'crop_sha256': digest(glyph), 'reason': reasons[i],
+         'decision': 'approve' if reasons[i] == 'clean' else 'reject'}
+        for i, (glyph, label) in enumerate(data['synthetic-query'])]}
+    predictions = {('synthetic-query', 0): 'K', ('synthetic-query', 1): '7', ('synthetic-query', 2): None}
+    result = diagnostics(data, manifest, predictions)
+    assert result['localization'] == {'clean': 1, 'wrong_neighbour': 1, 'blank': 1, 'partial': 0}
+    assert result['matching']['clean_crops'] == {'correct': 0, 'wrong': 1, 'abstain': 0}
+    assert result['matching']['visually_bad_crops'] == {'correct': 1, 'wrong': 0, 'abstain': 1}
+    assert result['correct_on_bad_crops'] == 1 and result['query_status'] == 'needs_visual_review'
+    assert all(sample['query_status'] == 'needs_visual_review' for sample in queue(data, manifest))
+    assert len(bank(data, manifest, 'production')) == 1
+
+
+def test_diagnostics_rejects_silent_omission_of_bad_queries():
+    import pytest
+    from tritowers_vision.curation_review import diagnostics
+    fixture = Tests(); fixture.setUp()
+    with pytest.raises(ValueError, match='every reviewed query'):
+        diagnostics(fixture.data, fixture.m, {('synthetic-a', 0): 'A'})
+
+
+def test_holdout_excludes_every_sample_from_query_photo():
+    fixture = Tests(); fixture.setUp()
+    fixture.m['samples'][1].update(reason='clean', decision='approve')
+    approved = bank(fixture.data, fixture.m, 'production')
+    training = bank(fixture.data, fixture.m, 'offline_logo', 'synthetic-a')
+    assert len(approved) == 3 and len(training) == 1
+    assert all(sample[2] != 'synthetic-a' for sample in training)
+
+
+def test_manifest_identity_schema_and_labels_are_validated():
+    import pytest
+    for change in ({'slot_index': False}, {'slot_index': -1}, {'photo_id': []}, {'reason': []}):
+        fixture = Tests(); fixture.setUp(); fixture.m['samples'][0].update(change)
+        with pytest.raises(ValueError): validate(fixture.data, fixture.m)
+    fixture = Tests(); fixture.setUp(); fixture.m['schema_version'] = 999
+    with pytest.raises(ValueError, match='schema'): validate(fixture.data, fixture.m)
+    fixture = Tests(); fixture.setUp()
+    fixture.data['synthetic-a'][0] = (fixture.data['synthetic-a'][0][0], 'Xc')
+    fixture.m['samples'][0]['card_label'] = 'Xc'
+    with pytest.raises(ValueError, match='card label'): validate(fixture.data, fixture.m)

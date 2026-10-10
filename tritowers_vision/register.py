@@ -23,7 +23,7 @@ def _ramp(x, lo, hi):
     return np.clip((x - lo) / (hi - lo), 0.0, 1.0)
 
 
-def evidence(rgb):
+def evidence(rgb, reference=None):
     """Per-pixel (face, back, parchment) evidence in [0, 1] from an RGB uint8 array, after white balance on the faces.
 
     Faces are bright and nearly neutral, backs are red-dominant, parchment is a saturated mid-dark brown; the rest (dark
@@ -36,6 +36,8 @@ def evidence(rgb):
         thr = np.percentile(v[cand], 85); ref = np.median(a[cand & (v >= thr)], axis=0)
     else:
         ref = np.percentile(a.reshape(-1, 3), 99, axis=0)
+    if reference is not None:
+        ref = np.asarray(reference, np.float32)
     a = np.clip(a * (240.0 / np.maximum(ref, 25.0)), 0, 255)
     v = a.max(axis=2); mn = a.min(axis=2); chroma = (v - mn) / (v + 1.0)
     red = (a[..., 0] - np.maximum(a[..., 1], a[..., 2])) / (a[..., 0] + 1.0)
@@ -101,14 +103,15 @@ class Registration:
     waste_dy: int = 0
     margins: dict = field(default_factory=dict)
     trusted: bool = True
+    checks: dict = field(default_factory=dict)
 
 
 class _Work:
-    def __init__(self, image):
+    def __init__(self, image, reference=None):
         w, h = image.size; self.f = min(1.0, WORK / max(w, h))
         small = image.resize((max(1, round(w * self.f)), max(1, round(h * self.f))), resample=3) if self.f < 1 else image
         self.size = small.size
-        self.face, self.back, self.parch = evidence(np.asarray(small.convert("RGB")))
+        self.face, self.back, self.parch = evidence(np.asarray(small.convert("RGB")), reference)
         self.obs = _observed(cardness(self.face, self.back), self.parch)
 
     def to_orig(self, H): return np.diag([1 / self.f, 1 / self.f, 1.0]) @ H
@@ -170,7 +173,7 @@ def _correction(tpl, obs, mask, motion, iters):
         if hasattr(cv2, "findTransformECCWithMask"):
             _, W = cv2.findTransformECCWithMask(tpl, obs, mask, np.full(obs.shape, 255, np.uint8), W, motion, crit, 3)
         else:
-            _, W = cv2.findTransformECC(tpl, obs, W, motion, crit, None, 3)
+            _, W = cv2.findTransformECC(tpl, obs, W, motion, crit, mask, 3)
     except cv2.error:
         return None
     return W.astype(np.float64) if W.shape == (3, 3) else np.vstack([W.astype(np.float64), [0, 0, 1]])
@@ -283,6 +286,14 @@ def register(image, manual_corners=None):
     work = _Work(image)
     W, Hh = work.size
     cands = []
+    if manual_corners is None:
+        frame = _rect_H(0, 0, W, Hh)
+        initial = _evaluate(work, frame)
+        if initial[0] >= .94:
+            H, q, present, dy, margins = _refine(work, frame)
+            trusted, checks = acceptance(work, H, q, present, dy)
+            if trusted:
+                return Registration(work.to_orig(H), q, "full_frame", present, dy, margins, trusted, checks)
     if manual_corners is not None:
         from .image import order_corners
         q = order_corners(manual_corners) * work.f
@@ -296,16 +307,97 @@ def register(image, manual_corners=None):
                 cands.append(("screen_quad", cv2.getPerspectiveTransform(np.float32([[0, 0], [1024, 0], [1024, 768], [0, 768]]), q).astype(np.float64)))
         except Exception:
             pass
+        from .automatic import candidates as anchor_candidates
+        cands += anchor_candidates(work)
         cands += _bright_quads(work, image)
         cands += [("search", H) for H in _search(work, top=4)]
-    cands = [(m, H0) for m, H0 in cands if _sane(H0, work.size)]
-    cands.sort(key=lambda c: -_evaluate(work, c[1])[0])        # most promising starting guess first
+    cands = [(m, H0, work) for m, H0 in cands if _sane(H0, work.size)]
+    if manual_corners is None:
+        from .automatic import photographic_candidates
+        cands += photographic_candidates(image, work)
+    scored = [(m, H, w, _evaluate(w, H)) for m, H, w in cands]
+    scored.sort(key=lambda candidate: -candidate[3][0])
     best = None
-    for method, H0 in cands:
-        H, q, present, dy, margins = _refine(work, H0)
-        if best is None or q > best[1] + 1e-6: best = (H, q, method, present, dy, margins)
-        if best[1] >= GOOD_ENOUGH: break
+    for method, H0, candidate_work, initial in scored:
+        # Refining many equivalent starts cannot improve a supported alignment;
+        # stop when both image evidence and scene-state checks pass strongly.
+        H, q, present, dy, margins = _refine(candidate_work, H0)
+        trusted, checks = acceptance(candidate_work, H, q, present, dy)
+        candidate = (H, q, method, present, dy, margins, trusted, checks, candidate_work)
+        if best is None or (trusted, q) > (best[6], best[1]):
+            best = candidate
+        if trusted:
+            break
     if best is None:
-        H = _rect_H(0, 0, W, Hh); return Registration(work.to_orig(H), 0.0, "none", set(), 0, {}, False)
-    H, q, method, present, dy, margins = best
-    return Registration(work.to_orig(H), q, method, present, dy, margins, q >= MIN_QUALITY)
+        H = _rect_H(0, 0, W, Hh)
+        return Registration(work.to_orig(H), 0.0, "none", set(), 0, {}, False)
+    H, q, method, present, dy, margins, trusted, checks, candidate_work = best
+    return Registration(candidate_work.to_orig(H), q, method, present, dy, margins, trusted, checks)
+
+
+def acceptance(work, H, quality, present, waste_dy):
+    """Accept only a supported scene, independently of rank matching scores.
+
+    The full-screen correlation can be reduced by lighting outside the cards.
+    An alternative path therefore requires substantially overlapping silhouettes,
+    the right face/back class inside cards, and no unexplained card-sized face.
+    Empty hypotheses face the same checks, preventing a missed last card from
+    silently turning into an empty board. None of these checks proves a rank.
+    """
+    res = .5
+    face, back = [warp_to_layout(m, H, res) for m in (work.face, work.back)]
+    actual = cardness(face, back) > .5
+    labels = scene.render(present, res, waste_dy, roi=FULL)
+    keep = _roi_mask(res) > 0
+    expected = (labels > 0) & keep
+    actual &= keep
+    intersection = np.count_nonzero(actual & expected)
+    union = max(1, np.count_nonzero(actual | expected))
+    iou = intersection / union
+    interior = cv2.erode((labels > 0).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & keep
+    recall = float(actual[interior].mean()) if interior.any() else 0.0
+    class_map = np.where(labels == scene.FACE, face, np.where(labels == scene.BACK, back, 0))
+    class_fit = float(class_map[interior].mean()) if interior.any() else 0.0
+    # Exclude ordinary edge mismatch; only a coherent bright interior, well away
+    # from predicted cards, can veto an empty slot. Parchment/red map ink cannot.
+    padding = max(1, round(12 * res))
+    explained = cv2.dilate(expected.astype(np.uint8), np.ones((padding * 2 + 1,) * 2, np.uint8)) > 0
+    residual = ((face > .7) & ~explained & keep).astype(np.uint8)
+    residual[:round(130 * res)] = 0
+    residual[round(550 * res):] = 0
+    residual = cv2.morphologyEx(residual, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(residual)
+    unexplained = max(stats[1:, cv2.CC_STAT_AREA], default=0) / (98 * 150 * res * res)
+    slot_fits, exposed_fits, covered_fits = [], [], []
+    for pos in sorted(present):
+        x0, y0, x1, _ = scene.RECTS[pos]
+        # The top 52 interior units are visible for either card orientation and
+        # exclude neighbouring cards, rounded corners, and lower court art.
+        region = np.s_[round((y0 + 8) * res):round((y0 + 60) * res),
+                       round((x0 + 8) * res):round((x1 - 8) * res)]
+        ev = face if scene.exposed(present, pos) else back
+        fit = float(ev[region].mean())
+        slot_fits.append(fit)
+        (exposed_fits if scene.exposed(present, pos) else covered_fits).append(fit)
+    minimum_slot = min(slot_fits, default=0.0)
+    supported = quality >= MIN_QUALITY and iou >= .78 and recall >= .88 and class_fit >= .46
+    independently_supported = quality >= .80 and iou >= .85 and recall >= .95 and class_fit >= .52
+    # Dense boards provide 19+ independent top-band observations. This path
+    # tolerates glare/colour spill on the surrounding map only when *every*
+    # exposed slot has face evidence and the covered pattern is independently supported.
+    # Covered occupancy also follows from the observed blockers; a small glare
+    # patch on one back must not erase a card that still has blockers in front.
+    dense_supported = (len(present) >= 19 and quality >= .70 and iou >= .74 and recall >= .985
+                       and class_fit >= .60 and min(exposed_fits, default=0.) >= .50
+                       and len(covered_fits) >= 8 and np.median(covered_fits) >= .65
+                       and np.mean(np.asarray(covered_fits) >= .48) >= .75 and unexplained < .08)
+    # An animated banner can add red/brown ink to otherwise empty parchment.
+    # Sparse boards remain supported when every actual card is locally verified
+    # and no unexplained bright card remains anywhere in the tableau. A missed
+    # last card fails that residual check even if screen correlation is high.
+    sparse_supported = (1 <= len(present) <= 18 and quality >= .80 and iou >= .65 and recall >= .985
+                        and class_fit >= .58 and minimum_slot >= .60 and unexplained < .05)
+    trusted = bool((supported or independently_supported or dense_supported or sparse_supported) and unexplained < .22)
+    checks = {"silhouette_iou": round(iou, 3), "card_interior": round(recall, 3),
+              "face_back_fit": round(class_fit, 3), "min_slot_fit": round(minimum_slot, 3), "unexplained_face": round(float(unexplained), 3)}
+    return trusted, checks

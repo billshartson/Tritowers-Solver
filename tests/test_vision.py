@@ -15,7 +15,7 @@ class VisionTests(unittest.TestCase):
     def test_manual_rectification(self):
         result=extract_screen(png_bytes(Image.new("RGB",(400,300))),[(20,20),(380,20),(380,280),(20,280)]); self.assertTrue(result.manual); self.assertEqual(result.rectified.size,(1024,768))
     def test_generated_quad(self):
-        array=np.zeros((600,800,3),dtype=np.uint8); points=np.array([[100,80],[720,120],[680,520],[140,500]],dtype=np.int32); cv2.fillConvexPoly(array,points,(230,230,230)); cv2.polylines(array,[points],True,(255,255,255),8); result=extract_screen(png_bytes(Image.fromarray(array))); self.assertIsNotNone(result.corners)
+        array=np.zeros((600,800,3),dtype=np.uint8); points=np.array([[100,80],[720,120],[680,520],[140,500]],dtype=np.int32); cv2.fillConvexPoly(array,points,(230,230,230)); cv2.polylines(array,[points],True,(255,255,255),8); result=extract_screen(png_bytes(Image.fromarray(array))); self.assertIsNotNone(result.corners); self.assertLess(np.max(np.linalg.norm(np.asarray(result.corners)-points,axis=1)),10); self.assertIsNotNone(result.rectified)
     def test_no_screen_unknown(self):
         result=recognize(None); self.assertEqual(result.skin,Skin.UNKNOWN); self.assertEqual(result.unsupported_reason,UnsupportedReason.SCREEN_NOT_RECTIFIED)
     def test_never_invents(self):

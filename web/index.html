@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TriTowers solver</title>
+<title>TriTowers solver</title><script src="/web/photo-input.js"></script>
 <style>
 :root{--bg:#f4f1ea;--ink:#1d1d1f;--mut:#6b6b70;--card:#fffdf7;--back:#a33;--ok:#2a7;--ask:#fc6;--pri:#e8590c;--blue:#1c6ed5}
 *{box-sizing:border-box}html,body{margin:0}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:12px;-webkit-tap-highlight-color:transparent}
@@ -22,7 +22,7 @@ button.b.pri{background:var(--pri);color:#fff}button.b:disabled{opacity:.45;curs
 .stepper{display:flex;align-items:center;gap:10px}.stepper button{width:48px;height:48px;font-size:24px}.stepper output{font-size:24px;font-weight:700;min-width:44px;text-align:center}
 .wslot{width:64px;height:84px;border-radius:9px;border:2px solid #8a8a8a;background:var(--card);font:700 30px system-ui;cursor:pointer}
 .setrow{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:8px 0}.lbl{font-size:13px;color:var(--mut);margin-bottom:4px}
-#photoView[hidden]{display:none!important}
+.wslot.review{border:3px solid #c80;background:#fff0bd}.c.review{color:var(--ink);border:3px solid #c80;background:#fff0bd;opacity:1}.c.review::before{content:"!";position:absolute;top:0;right:3px;font-size:12px}.c small{position:absolute;top:2px;left:4px;font-size:10px;font-weight:500}#photoView[hidden]{display:none!important}
 details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace,monospace;padding:8px;border-radius:8px;border:1px solid #bbb}
 #sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:10}
 #sheet.open{display:flex}#sheet .in{background:#fff;width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
@@ -38,12 +38,12 @@ details{margin-top:8px;font-size:14px}textarea{width:100%;font:14px ui-monospace
  <div class="seg" role="group" aria-label="Mode"><button type="button" id="modePlay" class="on">Play along (cards hidden)</button><button type="button" id="modeDeal">I know the whole deal</button></div>
  <p class="sub" id="modeHelp">Cards covered on the table stay hidden; I will ask for each one as it is uncovered.</p>
  <div class="panel"><div class="lbl">1. Read from a photo (optional)</div>
-  <div class="row"><button class="b" id="photoBtn" type="button">Choose photo of the machine screen</button></div><input id="photo" type="file" accept="image/*" hidden>
-  <div id="photoNote" class="sub" style="margin-top:8px"></div>
+  <div class="row"><button class="b" id="photoBtn" type="button">Choose photo of the machine screen</button></div><input id="photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" hidden>
+  <div id="photoNote" role="status" aria-live="polite" class="sub" style="margin-top:8px"></div>
   <img id="photoView" alt="What the photo reader saw: green read, yellow check, red covered, grey empty" hidden style="display:block;width:100%;margin-top:8px;border-radius:6px"></div>
- <div class="panel"><div class="lbl">2. Cards on the table (tap a card to set it; red = face-down)</div>
+ <div class="panel"><div class="lbl">2. Cards on the table (tap a card to set it; red = covered; yellow = check)</div>
   <div class="tw"><div class="towers" id="editBoard"></div></div>
-  <p class="sub">The 10 cards on the bottom row are face-up. Enter them here, or just press Start and I will ask for each one.</p>
+  <p class="sub">Check the picture and board together. Tap any card to correct it. Covered ranks and stock order stay unknown; set the stock counter below.</p>
   <div class="setrow"><div><div class="lbl">Waste card (required)</div><button class="wslot" id="wasteBtn" type="button">?</button></div>
    <div><div class="lbl">Stock cards left <small>(count the joker too: a fresh stock is 24, the joker is always the last card)</small></div><div class="stepper"><button class="b" id="stM" type="button" aria-label="fewer">&minus;</button><output id="stV">24</output><button class="b" id="stP" type="button" aria-label="more">+</button></div><label style="display:block;margin-top:6px;font-size:14px"><input type="checkbox" id="jk" checked> This machine has a joker</label></div></div>
   <div id="stockOrder" hidden><div class="lbl">Stock order, next card drawn first (<span id="soN">0</span> entered; must match the stock count above)</div><div class="chips" id="soChips"></div><div class="row"><button class="b" id="soAdd" type="button">Add cards</button><button class="b" id="soClear" type="button">Clear stock</button></div></div>
@@ -81,16 +81,22 @@ const $=id=>document.getElementById(id);
 let sid=sessionStorage.getItem("tt_sid"),busy=false,geo=null,aspect=1.9,S=null,setup={board:Array(28).fill("?"),waste:"",stock:24,joker:true,order:[],deal:false},SOL=null,step=0;
 function msg(t,cls){const m=$("msg");m.textContent=t||"";m.className=cls||""}
 function rid(){return (crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now())}
+let photoGeneration=0,photoAbort=null,photoDraft=false,photoReview=new Set(),photoStates={};
+const escapeHTML=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function editedPhoto(slot){photoGeneration++;if(photoAbort)photoAbort.abort();if(slot)photoReview.delete(String(slot));}
 const RETRY_MS=100000;   // keep retrying a failed request this long (the host's tunnel watchdog bounds outages at ~50 s)
-async function post(url,body,{timeout=75000,form=false}={}){
+async function post(url,body,{timeout=75000,form=false,signal=null,retry=true}={}){
   const id=rid();let last,firstFail=0;
   for(let i=0;;i++){
-    const ac=new AbortController(),t=setTimeout(()=>ac.abort(),timeout);
+    if(signal?.aborted)throw new DOMException("Cancelled","AbortError");
+    const ac=new AbortController(),abort=()=>ac.abort(),t=setTimeout(abort,timeout);
+    signal?.addEventListener("abort",abort,{once:true});
     try{
       const r=await fetch(url,{method:"POST",headers:form?{}:{"Content-Type":"application/json"},body:form?body:JSON.stringify({...body,req_id:id}),signal:ac.signal});
-      clearTimeout(t);
-      if(r.status>=500||r.status===429){last=new Error("server "+r.status)}else{const j=await r.json();if($("msg").className==="net")msg("");return j}
-    }catch(e){clearTimeout(t);last=e}
+      clearTimeout(t);signal?.removeEventListener("abort",abort);
+      if(r.status>=500||r.status===429){last=new Error("server "+r.status)}else{const j=await r.json();if(j.pending===true||j.busy===true){last=new Error(j.message||"Working…")}else{if($("msg").className==="net")msg("");return j}}
+    }catch(e){clearTimeout(t);signal?.removeEventListener("abort",abort);last=e}
+    if(signal?.aborted||!retry)throw last;
     if(!firstFail)firstFail=Date.now();
     const waited=Date.now()-firstFail;
     if(waited>=RETRY_MS)throw last;
@@ -102,16 +108,17 @@ function boardHTML(cells,mode){
   return cells.map(c=>{
     let cls=c.kind,txt=c.card;
     if(mode==="edit"){cls=c.card==="?"?"back":c.card==="--"?"gone":"up";cls+=" edit";txt=c.card==="--"?"":(c.card==="?"?"":c.card)}
+    if(mode==="edit"&&photoReview.has(String(c.p))){cls+=" review";if(c.card==="?")txt="?"}
     else{if(c.kind==="back"||c.kind==="gone")txt="";if(c.kind==="ask")txt="?"}
     if(mode==="play"&&S&&S.advice&&S.advice.pos===c.p)cls+=" rec";
     const label=mode==="edit"?`Position ${c.p}`:`Position ${c.p} ${c.card||""} ${c.kind}`;
-    return `<button type="button" class="c ${cls}" data-p="${c.p}" aria-label="${label}" style="left:${c.x}%;top:${c.y}%">${txt}</button>`}).join("");
+    return `<button type="button" class="c ${cls}" data-p="${c.p}" aria-label="${escapeHTML(label)}" style="left:${c.x}%;top:${c.y}%">${mode==="edit"?`<small>${c.p}</small>`:""}${escapeHTML(txt)}</button>`}).join("");
 }
 function sized(el){el.parentElement.style.aspectRatio=aspect;el.style.aspectRatio=aspect}
 function deckProblems(){const n={};const add=c=>{if(RANKS.includes(c))n[c]=(n[c]||0)+1};setup.board.forEach(add);add(setup.waste);if(setup.deal)setup.order.forEach(add);
   const bad=RANKS.filter(r=>n[r]>4).map(r=>r+" x"+n[r]);return bad.length?"Impossible deck: a deck has only four of each rank, but this board has "+bad.join(", ")+". Fix the board before starting.":""}
 function showDeck(){const w=$("deckWarn");if(!w)return "";const t=deckProblems();w.textContent=t;w.hidden=!t;return t}
-function drawEdit(){const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("stV").textContent=setup.stock;showDeck()}
+function drawEdit(){if(!geo)return;const cells=setup.board.map((card,i)=>({p:i+1,card,x:geo[i+1][0],y:geo[i+1][1],kind:""}));$("editBoard").innerHTML=boardHTML(cells,"edit");sized($("editBoard"));$("wasteBtn").textContent=setup.waste||"?";$("wasteBtn").classList.toggle("review",photoReview.has("waste"));$("stV").textContent=setup.stock;showDeck()}
 function draw(){
   $("setup").hidden=true;$("play").hidden=false;
   $("board").innerHTML=boardHTML(S.cells,"play");sized($("board"));
@@ -131,15 +138,16 @@ function keypad(title,extra,cb){
 function closeSheet(){$("sheet").classList.remove("open");document.querySelectorAll(".c.sel").forEach(e=>e.classList.remove("sel"))}
 $("sheetX").onclick=closeSheet;
 $("sheet").onclick=e=>{if(e.target.id==="sheet")closeSheet()};
-let chain=Promise.resolve(),pendingN=0;
-function act(op,extra,opts){pendingN++;const run=chain.then(()=>doAct(op,extra,opts||{}));chain=run.catch(()=>{}).then(()=>{pendingN--;if(pendingN===0){busy=false;if(S)draw()}});return chain}
-async function doAct(op,extra,{timeout}){
+let chain=Promise.resolve(),pendingN=0,gameGeneration=0;
+function act(op,extra,opts){const generation=gameGeneration,actionSid=sid;pendingN++;const run=chain.then(()=>generation===gameGeneration?doAct(op,extra,opts||{},actionSid,generation):null);chain=run.catch(()=>{}).then(()=>{pendingN--;if(pendingN===0){busy=false;if(S)draw()}});return chain}
+async function doAct(op,extra,{timeout},actionSid,generation){
   busy=true;if(S)draw();msg(op==="recommend"?"Thinking…":"");
   try{
-    const r=await post("/api/act",{sid,op,...extra},{timeout});
-    if(r.gone){sessionStorage.removeItem("tt_sid");sid=null;$("play").hidden=true;$("setup").hidden=false;msg(r.message,"err");return}
+    const r=await post("/api/act",{sid:actionSid,op,...extra},{timeout});
+    if(generation!==gameGeneration)return;
+    if(r.gone){sessionStorage.removeItem("tt_sid");sid=null;S=null;$("play").hidden=true;$("setup").hidden=false;msg(r.message,"err");return}
     S=r;draw();msg(r.message,r.ok?"":"err");poll();
-  }catch(e){msg("Could not reach the server. Check your connection and try again.","err")}
+  }catch(e){if(generation===gameGeneration)msg("Could not reach the server. Check your connection and try again.","err")}
 }
 $("board").onclick=e=>{const b=e.target.closest(".c");if(!b||!S)return;const p=+b.dataset.p,c=S.cells[p-1];
   if(c.kind==="play")act("play",{pos:p});
@@ -154,52 +162,64 @@ let pollT=null,pollGen=0;function poll(){clearTimeout(pollT);const gen=++pollGen
 $("recBtn").onclick=()=>act("recommend",{sims:1200},{timeout:70000});
 $("drawBtn").onclick=()=>{if(S&&S.joker&&S.stock===1){act("draw",{rank:"*"});return}keypad("Which card did you draw?",[],k=>act("draw",{rank:k}))};
 $("undoBtn").onclick=()=>act("undo",{});
-$("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){sessionStorage.removeItem("tt_sid");sid=null;S=null;$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
-$("editBoard").onclick=e=>{const b=e.target.closest(".c");if(!b)return;const p=+b.dataset.p;keypad("Set position "+p,["?","--"],k=>{setup.board[p-1]=k;drawEdit()})};
-$("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{setup.waste=k;drawEdit()});
-$("jk").onchange=()=>{setup.joker=$("jk").checked;if(!setup.joker&&setup.stock>23)setup.stock=23;if(setup.joker&&setup.stock===23)setup.stock=24;drawEdit()};
-$("stM").onclick=()=>{setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{setup.stock=Math.min(setup.joker?24:23,setup.stock+1);drawEdit()};
-$("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}setup.board=t.map(x=>x.toUpperCase());drawEdit();msg("Board set from text.")};
+$("newBtn").onclick=()=>{if(confirm("Start a new game? The current game will be lost.")){editedPhoto();gameGeneration++;pollGen++;clearTimeout(pollT);busy=false;sessionStorage.removeItem("tt_sid");sid=null;S=null;photoDraft=false;$("startBtn").textContent="Start game";$("play").hidden=true;$("setup").hidden=false;msg("");drawEdit()}};
+$("editBoard").onclick=e=>{const b=e.target.closest(".c");if(!b)return;const p=+b.dataset.p;keypad("Set position "+p,["?","--"],k=>{editedPhoto(p);setup.board[p-1]=k;drawEdit()})};
+$("wasteBtn").onclick=()=>keypad("Waste card",[],k=>{editedPhoto("waste");setup.waste=k;drawEdit()});
+$("jk").onchange=()=>{editedPhoto();setup.joker=$("jk").checked;if(!setup.joker&&setup.stock>23)setup.stock=23;if(setup.joker&&setup.stock===23)setup.stock=24;drawEdit()};
+$("stM").onclick=()=>{editedPhoto();setup.stock=Math.max(0,setup.stock-1);drawEdit()};$("stP").onclick=()=>{editedPhoto();setup.stock=Math.min(setup.joker?24:23,setup.stock+1);drawEdit()};
+$("pasteBtn").onclick=()=>{const t=$("paste").value.replace(/,/g," ").trim().split(/\s+/).filter(Boolean);if(t.length!==28){msg("Need 28 entries, got "+t.length+".","err");return}const tokens=t.map(x=>x.toUpperCase());if(tokens.some(x=>![...RANKS,"?","--"].includes(x))){msg("Use only A, 2–10, J, Q, K, ? or --.","err");return}editedPhoto();photoReview.clear();setup.board=tokens;drawEdit();msg("Board set from text.")};
 $("photoBtn").onclick=()=>$("photo").click();
-$("photo").onchange=async()=>{const f=$("photo").files[0];if(!f)return;msg("Reading photo…");$("photoNote").textContent="";$("photoView").hidden=true;
-  const fd=new FormData();fd.append("file",f);fd.append("corners","");
-  try{const r=await post("/api/photo",fd,{form:true,timeout:90000});
-    if(!r.ok){msg(r.message,"err");return}
-    setup.board=r.board;if(r.waste)setup.waste=r.waste;drawEdit();$("photoNote").textContent=r.note;
+$("photo").onchange=async()=>{
+  const f=$("photo").files[0];$("photo").value="";if(!f)return;
+  const generation=++photoGeneration;if(photoAbort)photoAbort.abort();photoAbort=new AbortController();
+  const started=performance.now();msg("Preparing photo…");$("photoNote").textContent="";$("photoView").hidden=true;
+  try{
+    const normalized=await TTPhoto.normalize(f,{signal:photoAbort.signal});
+    if(generation!==photoGeneration)return;
+    msg("Reading the cards…");const fd=new FormData();fd.append("file",normalized,"screen.jpg");fd.append("corners","");
+    const r=await post("/api/photo",fd,{form:true,timeout:90000,signal:photoAbort.signal,retry:false});
+    if(generation!==photoGeneration)return;
+    if(!r.ok){msg(r.message||"Could not read that photo.","err");return}
+    if(!Array.isArray(r.board)||r.board.length!==28||r.board.some(t=>![...RANKS,"?","--"].includes(t)))throw new Error("invalid_draft");
+    setup.board=r.board;setup.waste=RANKS.includes(r.waste)?r.waste:"";
+    photoDraft=true;photoReview=new Set((r.review||[]).map(String));photoStates=r.states||{};
+    setMode(false,true);drawEdit();$("startBtn").textContent="Confirm board & start";
+    $("photoNote").textContent=`Read in ${((performance.now()-started)/1000).toFixed(1)} s. ${r.note||"Check the board, waste and stock counter."}`;
     if(typeof r.overlay==="string"&&r.overlay.startsWith("data:image/jpeg;base64,")){$("photoView").src=r.overlay;$("photoView").hidden=false}
-    msg("Photo read. Check the cards below, then set the stock and Start.")}
-  catch(e){msg("Could not upload the photo. Try again.","err")}$("photo").value=""};
+    msg(r.trusted?"Board ready. Check the picture, correct any yellow cards, and confirm below.":"Layout uncertain. Check every position against the picture, or try a straighter photo.",r.trusted?"":"err");
+  }catch(e){if(generation===photoGeneration&&e.name!=="AbortError")msg(e.userMessage||"Could not read this photo. Choose a JPEG, PNG, WebP or HEIC image and try again.","err")}
+};
 $("startBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}if(!setup.waste){msg("Pick the waste card first (the card face-up next to the stock).","err");return}
-  busy=true;msg("");$("startBtn").textContent="Starting…";
+  editedPhoto();busy=true;msg("");$("startBtn").disabled=true;$("startBtn").textContent="Starting…";
   try{const r=await post("/api/new",{board:setup.board.join(" "),waste:setup.waste,stock:setup.stock,joker:setup.joker});busy=false;
     if(!r.ok){msg(r.message,"err");return}
     sid=r.sid;sessionStorage.setItem("tt_sid",sid);S=r;draw();msg(r.pending&&r.pending.length?"Tap each yellow ? and pick the card.":"")}
-  catch(e){busy=false;msg("Could not reach the server after about 100 s. Your board is kept - press Start again.","err")}finally{$("startBtn").textContent="Start game"}};
+  catch(e){busy=false;msg("Could not reach the server after about 100 s. Your board is kept - press Start again.","err")}finally{$("startBtn").disabled=false;$("startBtn").textContent=photoDraft?"Confirm board & start":"Start game"}};
 (async()=>{
-  const g=await (await fetch("/api/geo")).json();geo=g.geo;aspect=g.aspect;drawEdit();
+  try{const g=await (await fetch("/api/geo")).json();geo=g.geo;aspect=g.aspect;drawEdit();}catch(e){msg("Could not load the app. Reload to try again.","err");return}
   if(sid){try{const r=await post("/api/act",{sid,op:"state"});if(r.gone){sessionStorage.removeItem("tt_sid");sid=null}else{S=r;draw()}}catch(e){}}
 })();
 </script></body></html>
 
 <script>
-function setMode(deal){setup.deal=deal;$("modePlay").classList.toggle("on",!deal);$("modeDeal").classList.toggle("on",deal);
+function setMode(deal,fromPhoto=false){if(!fromPhoto)editedPhoto();setup.deal=deal;$("modePlay").classList.toggle("on",!deal);$("modeDeal").classList.toggle("on",deal);
   $("startBtn").hidden=deal;$("solveBtn").hidden=!deal;$("stockOrder").hidden=!deal;
   $("modeHelp").textContent=deal?"Every card must be known: the 28 table cards, the waste and the whole stock in order. I will not guess missing cards.":"Cards covered on the table stay hidden; I will ask for each one as it is uncovered.";
   drawStock()}
-function drawStock(){showDeck();$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip" data-i="${i}" aria-label="Stock card ${i+1}">${c}</button>`).join("")}
+function drawStock(){showDeck();$("soN").textContent=setup.order.length;$("soChips").innerHTML=setup.order.map((c,i)=>`<button type="button" class="chip" data-i="${i}" aria-label="Stock card ${i+1}">${escapeHTML(c)}</button>`).join("")}
 $("modePlay").onclick=()=>setMode(false);$("modeDeal").onclick=()=>setMode(true);
-$("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1),["remove","*"],k=>{if(k==="remove")setup.order.splice(i,1);else setup.order[i]=k;drawStock()})};
-$("soClear").onclick=()=>{setup.order=[];drawStock()};
-function addMany(){keypad("Next stock card ("+setup.order.length+" so far). Use * for the joker: it is always the last stock card.",["*"],k=>{setup.order.push(k);drawStock();if(k!=="*"&&setup.order.length<24)setTimeout(addMany,0)})}
+$("soChips").onclick=e=>{const b=e.target.closest(".chip");if(!b)return;const i=+b.dataset.i;keypad("Stock card "+(i+1),["remove","*"],k=>{editedPhoto();if(k==="remove")setup.order.splice(i,1);else setup.order[i]=k;drawStock()})};
+$("soClear").onclick=()=>{editedPhoto();setup.order=[];drawStock()};
+function addMany(){keypad("Next stock card ("+setup.order.length+" so far). Use * for the joker: it is always the last stock card.",["*"],k=>{editedPhoto();setup.order.push(k);drawStock();if(k!=="*"&&setup.order.length<24)setTimeout(addMany,0)})}
 $("soAdd").onclick=addMany;
 function showStep(){const f=SOL.frames[step];$("solN").textContent=step;$("solT").textContent=SOL.steps.length;$("solW").textContent=f.waste;$("solS").textContent=f.stock;
   $("solBoard").innerHTML=boardHTML(f.cells,"play");if(f.next)$("solBoard").querySelector(`[data-p="${f.next}"]`).classList.add("rec");
   $("solBoard").parentElement.style.aspectRatio=aspect;$("solBoard").style.aspectRatio=aspect;
-  $("solSteps").innerHTML=SOL.steps.map((t,i)=>`<li class="${i===step?"cur":""}" value="${i+1}">${t}</li>`).join("");
+  $("solSteps").innerHTML=SOL.steps.map((t,i)=>`<li class="${i===step?"cur":""}" value="${i+1}">${escapeHTML(t)}</li>`).join("");
   $("solPrev").disabled=step===0;$("solNext").disabled=step>=SOL.steps.length;$("solNext").textContent=step>=SOL.steps.length-1?(step>=SOL.steps.length?"Done":"Last step"):"Next step"}
 $("solPrev").onclick=()=>{if(step>0){step--;showStep()}};$("solNext").onclick=()=>{if(step<SOL.steps.length){step++;showStep()}};
 $("solEdit").onclick=()=>{$("solved").hidden=true;$("setup").hidden=false;msg("")};
-$("solveBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}busy=true;msg("Solving… this can take up to 25 seconds.");$("solveBtn").disabled=true;
+$("solveBtn").onclick=async()=>{if(busy)return;const dp=showDeck();if(dp){msg(dp,"err");return}editedPhoto();busy=true;msg("Solving… this can take up to 10 seconds.");$("solveBtn").disabled=true;
   try{const r=await post("/api/solve",{board:setup.board.join(" "),waste:setup.waste,stock:setup.order,stock_count:setup.stock},{timeout:60000});
     $("setup").hidden=true;$("solved").hidden=false;$("solBanner").textContent=r.message||"";$("solBody").hidden=true;msg("");
     if(r.ok&&r.status==="solved"){SOL=r;step=0;$("solBody").hidden=false;$("solBanner").className="adv";showStep()}else{$("solBanner").className="warn"}}

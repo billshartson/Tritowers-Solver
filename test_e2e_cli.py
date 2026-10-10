@@ -42,7 +42,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Waste:", r.stdout)
         self.assertIn("PLAY ", r.stdout)
         self.assertIn("WIN!", r.stdout)
-        self.assertNotIn("stock is empty", r.stdout)
+        self.assertIn("[PROVEN: verified winning line]", r.stdout)
 
     def test_same_seed_gives_same_session(self):
         a = run(["--skip-tutorial", "--seed", "7", "--simulations", "40"], session_input(5))
@@ -76,6 +76,7 @@ class EndToEndTests(unittest.TestCase):
                 if draws is not None and out.endswith("DRAW -> "):
                     if undo_draw_at and draw_i + 1 == undo_draw_at and not draw_undone:
                         draw_undone = True
+                        draw_i -= 1  # undo returns to the previous draw prompt
                         p.stdin.write("undo\n")
                     else:
                         p.stdin.write(draws[draw_i] + "\n")

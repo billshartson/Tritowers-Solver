@@ -59,9 +59,12 @@ def test_estimator_counts_reserved_slot_and_keeps_unknown_samples(monkeypatch):
         assert comp.stock[-1] == '*' and len(comp.stock) == 24
         return solver.SolveResult('unknown', [], 'timeout', 0, 0.0)
     monkeypatch.setattr(solver, 'solve_complete', fake)
-    stats = ui.estimate_moves(game, moves, samples=2, budget=0, rng=random.Random(2))
+    stats = ui.estimate_moves(game, moves, samples=2, budget=1, rng=random.Random(2))
     assert stats is not None and len(seen) == 2 * len(moves)
     assert all(s['n'] == 2 and s['unknown'] == 2 and s['won'] == 0 for s in stats.values())
+    seen.clear()
+    expired = ui.estimate_moves(game, moves, samples=2, budget=0, rng=random.Random(2))
+    assert not seen and all(s['n'] == 0 for s in expired.values())
     game.stock -= 1
     assert ui.estimate_moves(game, moves, samples=1) is None
 

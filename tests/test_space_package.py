@@ -25,11 +25,11 @@ class SpacePackageTests(unittest.TestCase):
             self.assertFalse(list(target.rglob("*.pyc")))
             self.assertFalse(list(target.rglob("__pycache__")))
             metadata = (target / "README.md").read_text().split("---")[1]
-            self.assertIn("sdk: gradio", metadata)
-            self.assertIn("app_file: app.py", metadata)
-            version = next(line.split(":", 1)[1].strip() for line in metadata.splitlines()
-                           if line.startswith("sdk_version:"))
-            self.assertIn("gradio==" + version, (target / "requirements.txt").read_text())
+            self.assertIn("sdk: docker", metadata)
+            self.assertIn("app_port: 7860", metadata)
+            self.assertIn('CMD ["python", "app.py"]', (target / "Dockerfile").read_text())
+            for dependency in ("gradio", "fastapi", "uvicorn", "python-multipart"):
+                self.assertIn(dependency + "==", (target / "requirements.txt").read_text())
 
     def test_existing_destination_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -117,7 +117,12 @@ def infer_presence(scorer, start=None):
 
     Returns (present set, waste_dy, per-slot margin in evidence pixels per unit card area)."""
     best = None
-    for init in [set(range(1, 29))] + ([set(start)] if start is not None and valid(start) else []):
+    seen = set()
+    for init in [set(range(1, 29)), set()] + ([set(start)] if start is not None and valid(start) else []):
+        key = frozenset(init)
+        if key in seen:
+            continue
+        seen.add(key)
         cur = set(init); dy = scorer.best_waste_dy(cur); s = scorer.score(cur, dy)
         for _ in range(60):
             moves = []

@@ -33,7 +33,6 @@ class PhotoRead:
 
 
 def _load(source):
-    if isinstance(source, Image.Image): return source.convert("RGB")
     return normalize_image(source)
 
 
@@ -51,9 +50,11 @@ def read_photo(source, templates=(), manual_corners=None):
     for p in range(1, 29):
         state = _state(reg.present, p)
         cards[f"tableau-{p:02d}"] = {"state": state, "rank": None, "score": 0.0, "margin": 0.0, "presence": round(float(reg.margins.get(p, 0.0)), 2)}
-        if state == "face_up": found[f"tableau-{p:02d}"] = glyphs.glyph(glyphs.corner_patch(rgb, reg.H, scene.RECTS[p][:2]), 1.0)
+        if state == "face_up":
+            slot = f"tableau-{p:02d}"
+            found[slot], cards[slot]["crop"] = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.RECTS[p][:2]), 1.0)
     cards["waste"] = {"state": "face_up", "rank": None, "score": 0.0, "margin": 0.0}
-    found["waste"] = glyphs.glyph(glyphs.corner_patch(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER), WASTE_SCALE)
+    found["waste"], cards["waste"]["crop"] = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER), WASTE_SCALE)
     ranks, fit = glyphs.read_ranks(found, templates)
     for slot, (rank, score, margin, tier) in ranks.items():
         cards[slot].update(rank=rank, score=round(score, 2), margin=round(margin, 2), tier=tier)
@@ -70,10 +71,12 @@ def read_photo(source, templates=(), manual_corners=None):
         review.update(cards)
         for c in cards.values():
             if c["rank"]: c["rank"] = None; c["tier"] = "untrusted_layout"
+            c["inferred_state"] = c["state"]
+            c["state"] = "unknown"
     order = list(cards)
     draft = {"cards": cards, "needs_human_review": [s for s in order if s in review], "complete": not review,
              "stock_counter": None, "note": NOTE,
-             "registration": {"method": reg.method, "quality": round(reg.quality, 3), "trusted": reg.trusted},
+             "registration": {"method": reg.method, "quality": round(reg.quality, 3), "trusted": reg.trusted, "checks": reg.checks},
              "font_fit": round(fit, 3)}
     rectified = Image.fromarray(cv2.warpPerspective(rgb, reg.H, scene.FRAME, flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP))
     return PhotoRead(draft, overlay(image, reg, cards, review), rectified, reg)
@@ -91,13 +94,15 @@ def board_tokens(draft):
 def labelled_glyphs(source, board, waste):
     """(rank, glyph) templates from a labelled image (board: 28 tokens). Used to build private photo templates."""
     image = _load(source); reg = register(image); rgb = np.asarray(image); out = []
+    if not reg.trusted:
+        return out
     for p, tok in enumerate(board, 1):
         if tok in glyphs.RANKS:
-            g = glyphs.glyph(glyphs.corner_patch(rgb, reg.H, scene.RECTS[p][:2]), 1.0)
-            if g.sum(): out.append((tok, g))
+            g, _ = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.RECTS[p][:2]), 1.0)
+            if g is not None and g.sum(): out.append((tok, g))
     if waste in glyphs.RANKS:
-        g = glyphs.glyph(glyphs.corner_patch(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER), WASTE_SCALE)
-        if g.sum(): out.append((waste, g))
+        g, _ = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER), WASTE_SCALE)
+        if g is not None and g.sum(): out.append((waste, g))
     return out
 
 
