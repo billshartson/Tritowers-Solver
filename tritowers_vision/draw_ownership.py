@@ -45,7 +45,11 @@ def owned(image,boxes,counts,soft=False):
     sx,sy,sw,sh,area=st[k];gx=sx+l;gy=sy+t
     overlap=max(0,min(gx+sw,x+w)-max(gx,x))*max(0,min(gy+sh,y+h)-max(gy,y))
     # Only components rooted inside the geometric rank band; not a suit below it.
-    if area>=4 and overlap>=min(area*.3,12) and gy+sh*.5<=bottom+height*.02:chosen.append(k)
+    # A thin component continuing below the rank band and barely touching
+    # the detector is card-boundary ink, not a detached horizontal stroke.
+    horizontal_overlap=max(0,min(gx+sw,x+w)-max(gx,x))
+    edge=(sw<sh*.2 and gy+sh>bottom+height*.12 and horizontal_overlap<sw*.3)
+    if not edge and area>=4 and overlap>=min(area*.3,12) and gy+sh*.5<=bottom+height*.02:chosen.append(k)
    if chosen:
     largest=max(st[k,4] for k in chosen);chosen=[k for k in chosen if st[k,4]>=largest*.08]
    selected=np.isin(L,chosen)
