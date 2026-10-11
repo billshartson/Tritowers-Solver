@@ -61,6 +61,6 @@ def test_estimator_receives_known_joker_completions(monkeypatch):
     monkeypatch.setattr(solver, 'solve_complete', fake)
     moves = game.legal_moves()
     assert moves
-    stats = ui.estimate_moves(game, moves, samples=1, budget=0)
+    stats = ui.estimate_moves(game, moves, samples=1, budget=1)
     assert len(seen) == len(moves)
     assert all(s['unknown'] == 1 and s['won'] == 0 and s['n'] == 1 for s in stats.values())

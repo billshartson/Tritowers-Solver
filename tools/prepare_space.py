@@ -5,7 +5,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
-    "app.py", "web_app.py", "solver_ui.py", "solver.py", "tritowers_cli.py",
+    "app.py", "web_app.py", "web_shared.py", "Dockerfile", "solver_ui.py", "solver.py", "tritowers_cli.py",
     "requirements.txt", "MODEL_CARD.md",
 )
 

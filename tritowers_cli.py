@@ -5,6 +5,7 @@ because its patch could not cross the peer channel. Rules remain in ``solver``.
 """
 
 import argparse
+import math
 from dataclasses import dataclass, field
 
 import solver
@@ -12,14 +13,15 @@ import solver
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Interactive rank-only TriTowers solver")
-    parser.add_argument("--seed", type=int, help="make sampled recommendations reproducible")
+    sampling = parser.add_mutually_exclusive_group()
+    sampling.add_argument("--seed", type=int, help="make fixed-work sampled recommendations reproducible; excludes --time-budget")
     parser.add_argument(
         "--simulations", type=positive_int, default=solver.SIMULATIONS,
         help=f"simulations per candidate (default: {solver.SIMULATIONS})",
     )
-    parser.add_argument(
+    sampling.add_argument(
         "--time-budget", type=positive_float, default=None,
-        help="cap total sampling time per recommendation, in seconds",
+        help="limit sampling time per recommendation, in seconds (run counts vary; excludes --seed)",
     )
     parser.add_argument("--skip-tutorial", action="store_true", help="skip the startup tutorial")
     parser.add_argument("--joker", action="store_true", help="the machine has a joker as the last stock card (stock counter includes it, so a fresh stock is 24)")
@@ -35,7 +37,7 @@ def positive_int(value):
 
 def positive_float(value):
     parsed = float(value)
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive number")
     return parsed
 
@@ -92,6 +94,6 @@ def read_rank_or_command(prompt, input_fn=input):
     command = raw.lower()
     if command in {"undo", "u"}:
         return "UNDO"
-    if command in {"quit", "q", "exit"}:
+    if command in {"quit", "exit"}:
         return "QUIT"
     return solver.normalize(raw)

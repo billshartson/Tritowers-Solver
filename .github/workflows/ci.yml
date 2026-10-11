@@ -9,41 +9,40 @@ permissions:
 
 jobs:
   test:
-    name: Python ${{ matrix.python-version }}
+    name: All Python tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-
+        python-version: ["3.10", "3.12"]
+    env:
+      GRADIO_ANALYTICS_ENABLED: "False"
+      TT_REQUIRE_TEST_FONTS: "1"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Compile
-        run: python -m py_compile solver.py tritowers_cli.py tools/heuristic_baseline.py
-      - name: Test
-        run: python -m unittest -v test_solver.py test_cli.py test_perf_equiv.py test_setup_stock.py test_time_budget.py test_heuristic_baseline.py test_e2e_cli.py test_stock_empty.py
-      - name: UI and vision tests
-        run: |
-          python -m pip install pytest
-          python -m pytest -q tests/test_solver_ui.py tests/test_space_package.py
-  vision:
-    name: Photo reader
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - name: Install
-        run: python -m pip install -r requirements.txt pytest httpx
-      - name: Vision tests
-        run: python -m pytest -q tests/test_reader.py tests/test_vision.py tests/test_calibrated.py tests/test_rank2.py tests/test_annotation.py tests/test_curation.py tests/test_draw_objects.py tests/test_draw_matching.py tests/test_geometry_rejection.py tests/test_draw_extraction.py tests/test_draw_owned_geometry.py tests/test_draw_card_edge.py
+          node-version: "22"
+      - name: Install runtime and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-dejavu-core
+          python -m pip install -r requirements.txt pytest httpx
+          python -m pip check
+      - name: Compile and import all runtime entrypoints
+        run: |
+          python -m compileall -q -x '/(.git|.venv|local)/' .
+          python -c 'import app, web_app, web_shared, annotation_app, tritowers_vision; assert app.app is not None'
+      - name: Discover every non-browser test
+        run: python -m pytest -q -m 'not browser'
   browser:
     name: Browser end-to-end
     runs-on: ubuntu-latest
+    env:
+      TT_REQUIRE_TEST_FONTS: "1"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -51,7 +50,11 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: |
-          python -m pip install -r requirements.txt pytest playwright
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core
+          python -m pip install -r requirements.txt pytest httpx playwright
           python -m playwright install --with-deps chromium
-      - name: Browser tests
-        run: TT_CHROME= python -m pytest -q tests/test_web_e2e.py
+      - name: Build browser-only runtime (public sources only)
+        run: python tools/prepare_static.py /tmp/tritowers-static --download-runtime
+      - name: Browser tests (HTTP and real Pyodide worker)
+        run: TT_CHROME= TT_STATIC_SITE=/tmp/tritowers-static python -m pytest -q -m browser

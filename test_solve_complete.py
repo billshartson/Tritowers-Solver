@@ -34,7 +34,7 @@ class T(unittest.TestCase):
         r = solve_complete(Game(UNSOLV[0], UNSOLV[1], True, UNSOLV[2]), max_nodes=5)
         self.assertEqual((r.status, r.reason, r.moves), ("unknown", "node_limit", []))
         r = solve_complete(Game(UNSOLV[0], UNSOLV[1], True, UNSOLV[2]), time_budget=0.0)
-        self.assertIn(r.status, ("unknown", "unsolvable"))
+        self.assertEqual((r.status, r.reason), ("unknown", "timeout"))
     def test_incomplete_is_unknown(self):
         b, w, s = next(deals(1, 1))
         self.assertEqual(solve_complete(Game(["?"]+b[1:], w, True, s)).status, "incomplete")

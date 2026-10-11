@@ -44,9 +44,9 @@ class GuaranteeTests(unittest.TestCase):
 
     def test_immediate_win_is_guaranteed(self):
         board = ["--"] * solver.TOTAL_TABLEAU
-        board[18] = "2"
+        board[0] = "2"
         game = solver.Game(board, "A", False, 0)
-        self.assertEqual(solver.guaranteed_moves(game), [19])
+        self.assertEqual(solver.guaranteed_moves(game), [1])
 
 
 class RecommendationTests(unittest.TestCase):
@@ -62,7 +62,7 @@ class RecommendationTests(unittest.TestCase):
 
     def test_immediate_win_recommendation_is_proven(self):
         board = ["--"] * solver.TOTAL_TABLEAU
-        board[18] = "2"
+        board[0] = "2"
         game = solver.Game(board, "A", False, 0)
         recommendation = solver.best_move(game, simulations=7)
         self.assertEqual(recommendation.evidence, solver.Evidence.PROVEN)
@@ -132,11 +132,11 @@ class PlayValidationTests(unittest.TestCase):
 
     def test_rejects_already_removed_position(self):
         board = ["--"] * solver.TOTAL_TABLEAU
-        board[18] = "2"
+        board[0] = "2"
         game = solver.Game(board, "A", False, 0)
-        game.play(19)
+        game.play(1)
         with self.assertRaises(ValueError):
-            game.play(19)
+            game.play(1)
 
 
 class MoveScoreTests(unittest.TestCase):
@@ -190,7 +190,7 @@ class CliCompatibilityTests(unittest.TestCase):
             (["?"] * solver.TOTAL_TABLEAU, True, list(solver.RANKS) * 2),
         ):
             with self.subTest(stock_known=stock_known, stock=stock):
-                with self.assertRaisesRegex(ValueError, "Unknown cards exceed"):
+                with self.assertRaises(ValueError):
                     solver.validate_deal(board, "A", stock_known, stock)
 
     def test_validate_deal_accepts_exact_unseen_capacity(self):

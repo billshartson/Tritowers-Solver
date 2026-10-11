@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["."]
+norecursedirs = [".git", ".venv", "venv", "local", "node_modules", "dist"]
+markers = ["browser: browser integration tests requiring Playwright Chromium"]
