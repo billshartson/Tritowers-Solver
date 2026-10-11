@@ -563,6 +563,8 @@ def _read_photo(found, details, valid, reads):
                 reads[slot] = new
                 changed = True
         if not changed:
+            if not glyphs.font_tier_enabled():
+                break
             args = (list(views), reads, similar, ranking, contradicted)
             named = glyphs.consensus(*args) or glyphs.exclusion(*args)
             if not named:

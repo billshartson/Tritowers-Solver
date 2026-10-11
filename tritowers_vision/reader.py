@@ -52,9 +52,9 @@ def read_photo(source, templates=(), manual_corners=None):
         cards[f"tableau-{p:02d}"] = {"state": state, "rank": None, "score": 0.0, "margin": 0.0, "presence": round(float(reg.margins.get(p, 0.0)), 2)}
         if state == "face_up":
             slot = f"tableau-{p:02d}"
-            found[slot], cards[slot]["crop"] = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.RECTS[p][:2]), 1.0)
+            found[slot], cards[slot]["crop"] = glyphs.extract_at(rgb, reg.H, scene.RECTS[p][:2])
     cards["waste"] = {"state": "face_up", "rank": None, "score": 0.0, "margin": 0.0}
-    found["waste"], cards["waste"]["crop"] = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER), WASTE_SCALE)
+    found["waste"], cards["waste"]["crop"] = glyphs.extract_at(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER, WASTE_SCALE)
     counters = {slot: cards[slot]["crop"].get("counters") for slot in found if cards[slot]["crop"].get("counters") is not None}
     ranks, fit = glyphs.read_ranks(found, templates, counters)
     if fit >= glyphs.FONT_FIT:
@@ -101,10 +101,10 @@ def labelled_glyphs(source, board, waste):
         return out
     for p, tok in enumerate(board, 1):
         if tok in glyphs.RANKS:
-            g, _ = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.RECTS[p][:2]), 1.0)
+            g, _ = glyphs.extract_at(rgb, reg.H, scene.RECTS[p][:2])
             if g is not None and g.sum(): out.append((tok, g))
     if waste in glyphs.RANKS:
-        g, _ = glyphs.extract(glyphs.corner_patch(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER), WASTE_SCALE)
+        g, _ = glyphs.extract_at(rgb, reg.H, scene.waste_rect(reg.waste_dy)[:2], glyphs.WASTE_CORNER, WASTE_SCALE)
         if g is not None and g.sum(): out.append((waste, g))
     return out
 

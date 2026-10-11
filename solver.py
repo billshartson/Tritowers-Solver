@@ -1363,6 +1363,18 @@ def _newly_exposed(game, position):
     ]
 
 
+# Relative preference units, not probabilities or proven optimal weights.
+# Unknown reveals are favoured over known reveals; an immediately playable
+# known reveal earns an extra bonus. Clearing a blocker is a smaller tie-break.
+# These preserve the existing policy. tools/heuristic_baseline.py compares the
+# policy on seeded full-information deals; it does not fit these weights or
+# establish performance on hidden-information play.
+UNKNOWN_REVEAL_WEIGHT = 20
+KNOWN_REVEAL_WEIGHT = 10
+PLAYABLE_REVEAL_BONUS = 8
+CLEARED_BLOCKER_WEIGHT = 1
+
+
 def move_score(game, position):
     """Score only consequences caused by this move.
 
@@ -1383,15 +1395,15 @@ def move_score(game, position):
     for exposed_position in newly_exposed:
         card = board[exposed_position - 1]
         if card == "?":
-            score += 20
+            score += UNKNOWN_REVEAL_WEIGHT
         else:
-            score += 10
+            score += KNOWN_REVEAL_WEIGHT
             if can_play(card, waste):
-                score += 8
+                score += PLAYABLE_REVEAL_BONUS
 
     # Prefer moves that remove a blocker from still-covered cards. This differs
     # between sibling moves and measures genuine future progress.
-    score += sum(
+    score += CLEARED_BLOCKER_WEIGHT * sum(
         position in blockers
         for covered, blockers in BLOCKERS.items()
         if covered not in removed
@@ -1905,20 +1917,18 @@ def main(argv=None):
 # START
 # ======================================================================
 
-if __name__ == "__main__":
-
+def run_cli():
+    """Handle normal terminal stops; let programming errors keep their traceback."""
     try:
-
         main()
-
     except EOFError:
-
-        print(
-            "\nInput ended; solver stopped."
-        )
-
+        print("Input ended; solver stopped.", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
+        print("\nSolver stopped.", file=sys.stderr)
+        return 130
+    return 0
 
-        print(
-            "\nSolver stopped."
-        )
+
+if __name__ == "__main__":
+    raise SystemExit(run_cli())

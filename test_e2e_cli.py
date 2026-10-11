@@ -185,8 +185,8 @@ class EndToEndTests(unittest.TestCase):
 
     def test_eof_mid_entry_stops_cleanly(self):
         r = run(["--skip-tutorial"], "1\n1\n")
-        self.assertEqual(r.returncode, 0)
-        self.assertIn("Input ended", r.stdout)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Input ended", r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
 

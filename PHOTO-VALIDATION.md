@@ -41,6 +41,26 @@ The development-set misses were inspected crop by crop. Resolution was not the c
   layouts started at .52 or more in all 126 local and generated checks). Rejected photos now take 1.2-1.3 s
   natively instead of 2.5-2.8 s; accepted registrations and all metrics are unchanged.
 
+The follow-up adds crop-integrity checks and a bounded aspect retry:
+
+- Significant discarded edge ink beside a rank makes the crop incomplete. A clipped 9 can no longer lose its loop
+  and become a confidently named J. Aligned digit tops and bottoms also catch a clipped zero across a wider gap
+  from the first digit of 10. The check measures actual ink within the rank band, so connected card outlines and a
+  suit below the rank do not invalidate a complete index.
+- A connected component crossing the bottom of the rank band is not a complete index. This catches a Q joined to
+  its suit symbol whose truncated shape otherwise resembles 9. The expanded generated-scene audit found this while
+  testing the aspect retry; the regression is covered separately from match confidence.
+- The entire corner ownership window must project inside the source photograph. Border replication cannot supply
+  evidence for a missing half of a rank. This guard applies to reading and private training extraction; eight
+  progressive edge-crop probes now abstain while preserving the visible card's face-up state.
+- For a valid complete index that remains unread, the reader may retry horizontal scale at ±2% and ±4%. The
+  original winner must already have the required margin, remain the winner in all four views, and pass both font
+  gates in two adjacent views. The reported score and margin are the weaker supporting values. The image's font
+  must fit, and private-template-only mode remains unchanged. This is a bounded new acceptance path, not evidence
+  that an arbitrary low-scoring crop is readable. Invalid and clipped indexes cannot enter it.
+- Full-grid consensus and exclusion now respect `TT_FONT_TIER=0`. Disabling fonts leaves normal ranks unread;
+  the final joker still follows the explicit machine rule.
+
 ## Measured scope
 
 These are development-set results on the same captures used for tuning, not independent field accuracy. Counts are
@@ -54,28 +74,45 @@ before human correction. The joker's identity comes from the machine rule and is
 | 20 original/derived grid cases (JPEG 1600/1200, 2° rotation, perspective) | 1031/1040 | 9 | 0 |
 | Nine tableau photos, originals | 77/77 | 0 | 0 |
 | Same, actual browser conversion (Python) | 77/77 | 0 | 0 |
-| Same, real Pyodide build with browser HEIC decode | 76/77 | 1 | 0 |
+| Same, real Pyodide build with browser HEIC decode | 77/77 | 0 | 0 |
+| Four added legacy screenshots, originals and actual browser conversion in both engines | 22/22 | 0 | 0 |
 
 - Previous results on the same inputs: grids 166/208 (original) and 170/208 (browser), tableau 71/77.
 - All 53 grid slot states, the stock order and the joker tail are exact on all four originals and browser
   conversions (complete exact deals: 4/4 each). All twenty derived cases are detected; the nine unknowns are in two
   variants of one grid. All 28 slot states are correct on every tableau photo in every path.
-- The one Pyodide unknown is one photo's lone curly 2: the browser runtime's JPEG decoder gives slightly different
-  pixels and a font score of .749 against the unchanged .75 floor. It stays unknown, never wrong.
+- Final replay covers 17 local images and 307 visible normal ranks: all are correct before correction, with exact
+  native/worker parity on actual browser-normalized bytes. All layouts are trusted. Normalized IMG_7194 retains
+  one conservative presence-review flag at position 28 despite its correct rank. The four added screenshots show
+  deals already present in the earlier captures; they are not independent held-out photos.
+- The previous Pyodide unknown was one photo's lone curly 2, scoring .749 against the .75 floor. Further inspection
+  found different native/browser registration transforms, not just JPEG decoding: native OpenCV 5 uses separate
+  template/input masks during refinement, while browser OpenCV 4.11 exposes the older input-mask API. The resulting
+  rank crops have different aspect ratios. The bounded aspect retry recovers this rank without lowering either
+  font gate; it is a new acceptance path, not a claim that the original low score passed unchanged.
 - Eight obscured-rank probes left every obscured rank unknown with no wrong names; unmasked ranks read 50-51 of 51.
   As before, masking one grid's first rank makes it fall back to the tableau path.
-- Generated grids (public, 20 seeds): 938/1040 ranks named, zero wrong even before the deck-count rule (previously
-  838, and three deck tens were read as J and only hidden by that rule). Seed 12 is not detected, as before.
-- Synthetic tableau scenes (fonts outside the bank): 18 scenes 73.4% named, 0 wrong (was 70.5%); 96 scenes 69.2%
-  (was 65.8%), with one wrong name in crop mode that the previous code also produced.
-- Bill's 43d983d replay of 1600×1200 tableau JPEGs returning 28 unknowns did not reproduce here: browser
-  conversions, Pillow conversions (Lanczos, bilinear, nearest at quality 95/85/75), `sips` and recompressed browser
-  JPEGs all registered, natively and in the Pyodide build. Exact inputs are needed to investigate further.
+- Generated grids (public, 20 seeds): 936/1040 ranks named, 104 unknown, zero wrong even before the deck-count
+  rule. This sacrifices two reads versus the previous build's 938 to reject incomplete crops. Seed 12 is not
+  detected, as before.
+- Expanded synthetic tableau audit: 396 scenes, 2229/3285 ranks correct, 1056 unknown, zero wrong names and zero
+  false-present/false-empty slots; 336 card states remain unresolved. The 246 diagnostic/tuning scenes score
+  1368/2023; 96 scenes using a separate seed not used to choose fixes score 560/807; 54 additional scenes with
+  regular, italic and monospace fonts score 301/455. These generated scenes are not independent field photos.
+  On the original 96-scene subset, the previous build named 551/796 with one wrong name; this build names 548/796
+  with zero wrong. The stricter crop checks intentionally trade some recall for fewer confident mistakes.
+- Bill reproduced the 28-unknown regression on **94423b2**, using four exact JPEGs in
+  [his latest review](https://github.com/billshartson/Tritowers-Solver/pull/52#issuecomment-6100697691).
+  Three of the four remain untrusted in his actual browser run; two remain untrusted natively. No matching bytes
+  have been located using the previously supplied hashes. The four added 1024×768 screenshots have different
+  dimensions and hashes. Other conversions passing here do not resolve that report.
+  Those exact inputs remain unverified; the development-set results must not be presented as a fix for that report.
 
-Timing on the same Mac and runtime, unthrottled. CDP CPU throttling slows the page but not the Web Workers that
-decode and recognise, so these are not phone timings. A grid HEIC takes 3.9-4.6 s end to end including about 2.7 s
-of browser HEIC decoding (previous build: 3.4-3.7 s); tableau HEICs 4.7-5.1 s and tableau JPEGs 1.0-2.1 s are
-unchanged. Natively a grid read takes about 0.6 s, as before. The worker builds the font caches while idle.
+The final 17-image replay's warm worker calls took 0.956–2.881 s under concurrent validation load, excluding
+normalization and startup. These are diagnostic timings, not an isolated before/after benchmark. The preceding
+build's isolated Mac measurements were 3.9–4.6 s end to end for grid HEICs, including about 2.7 s of HEIC decoding.
+CDP CPU throttling does not slow the Web Workers that decode and recognise, so neither measurement represents
+phone performance. The worker builds the font caches while idle.
 
 ## App: waste and stock
 
@@ -89,6 +126,14 @@ covers the board, controls or the rank keypad; at 390px the board, waste, stock 
 Views and replay frames carry an explicit `next_action` (`play` with `pos`, `draw`, `reveal` with `positions`,
 `done`, or `none` with a reason) and `stock_next`. A null position no longer has to be interpreted, and `can_draw`
 remains permission only. Advice carries the same `action`. HTTP and the browser worker share this code.
+
+## Upstream maintenance
+
+The recent merged changes on `benamoore96/Tritowers-Solver/main` were reviewed and adapted: terminal EOF now exits
+with status 1, Ctrl-C with status 130, and successful completion with status 0. Unexpected exceptions retain their
+tracebacks. Existing heuristic weights now have descriptive names, with their values and behavior unchanged.
+The CLI's joker support, time budgets, validated stock and undo behavior remain intact. Source commits and author
+credit are recorded in [ALEX-ATTRIBUTION.md](ALEX-ATTRIBUTION.md).
 
 ## Issue coverage
 
@@ -106,12 +151,15 @@ remains permission only. Advice carries the same `action`. HTTP and the browser 
 
 ## Automated checks
 
-Local validation: 441 non-browser tests passed, plus seven unittest subtests; two legacy-font tests skip on macOS
-(CI installs the fonts) and the private iPhone intake test passes when `TT_PRIVATE_PHOTOS=local` is set. All 28
+Local validation: 474 non-browser tests passed, plus nine unittest subtests; two legacy-font tests skip on macOS
+(CI installs the fonts) and the private iPhone intake test passes when `TT_PRIVATE_PHOTOS=local` is set. All 29
 browser tests passed against a fresh static build; one optional private-template fixture skipped. New public
 regressions cover border-cut tens, drawn borders, bezel marks and bridged ranks, faded fours and hairline aces,
 same-image consensus and exclusion, full-resolution hole counts, a slightly low tableau index, the refinement cap,
-the `next_action` contract in HTTP and the worker, and the stock area at 390px in both builds.
+the `next_action` contract in HTTP and the worker, and the stock area at 390px in both builds. The follow-up covers
+bounded aspect consensus and ambiguous rivals, complete crop ownership and source support, font-disable behavior,
+replay manifest hashes and deadlines, and terminal exit statuses. The built Python archive contains only the 22
+allowlisted public source files, each matching the tested checkout.
 
 ## Reproduce
 
@@ -129,5 +177,12 @@ python tools/evaluate_full_deal.py --labels local/full-deal-browser-labels.json
 ```
 
 `vision_eval.py` reports wrong named ranks, rank abstentions, false-present slots, false-empty slots and unresolved geometry separately. Its optional leave-one-photo-out private-template diagnostic is not an independent validation claim. Local labels, performance details and overlays remain outside the public repository.
+
+For a report about exact input bytes, use [tools/REPLAY-PHOTOS.md](tools/REPLAY-PHOTOS.md). The replay command checks
+manifest hashes before decoding, builds fresh public sources, and compares original bytes with the actual browser
+JPEG normalization through both engines. Each worker response is awaited directly, with a deadline; a stale
+"Read in…" message cannot complete a later case. Reports contain source/runtime hashes, aggregate counts and
+timings, without image contents or rank values. A raw HEIC sent directly to Pyodide can fail because that runtime
+has no HEIF plugin; browser normalization is the supported app path and is measured separately.
 
 Before closing the field-validation portions of #46/#51, capture independently labeled sessions under different lighting/perspective and measure cold/warm named-board confirmation on a physical iPhone, including actual Safari HEIC intake and first-visit network loading. No new paid hosting or origin restart is required for this PR.

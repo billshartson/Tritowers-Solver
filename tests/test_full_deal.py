@@ -252,3 +252,14 @@ def test_bezel_marks_and_bridged_ranks_do_not_shift_the_deal():
     draw.rectangle((x + 30, y + 30, x + 64, y + 33), fill=(22, 24, 25))
     draft = _assert_draft(read_full_deal(image), truth, minimum_read=45)
     assert not [slot for slot, card in draft['cards'].items() if card.get('tier') == 'deck_conflict']
+
+
+def test_disabled_font_tier_cannot_name_grid_ranks_through_consensus(monkeypatch):
+    image, _ = make_grid(3)
+    monkeypatch.setenv('TT_FONT_TIER', '0')
+    result = read_full_deal(image)
+    assert result is not None
+    cards = result.draft['cards']
+    assert cards['stock-24']['rank'] == '*'  # fixed machine rule, independent of fonts
+    assert all(card['rank'] is None for slot, card in cards.items() if slot != 'stock-24')
+    assert len(result.draft['needs_human_review']) == 52
